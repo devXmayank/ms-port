@@ -1,0 +1,1 @@
+(function(){new URLSearchParams(location.search).get("error")==="1"&&document.getElementById("err").classList.add("show"),fetch("/auth/status").then(function(t){return t.json()}).then(function(t){t.authenticated&&t.verified&&(location.href="/admin")}).catch(function(){})})();
