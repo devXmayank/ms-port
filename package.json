@@ -1,0 +1,33 @@
+{
+  "name": "code-and-classroom",
+  "version": "1.0.0",
+  "description": "Student portfolio + material hub with admin panel",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "hash-password": "node -e \"require('bcrypt').hash(process.argv[1], 12).then(h => console.log(h))\""
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.4.0",
+    "connect-mongo": "^5.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^7.4.0",
+    "express-session": "^1.18.0",
+    "helmet": "^7.1.0",
+    "mongodb": "^6.8.0",
+    "mongoose": "^8.5.0",
+    "multer": "^1.4.5-lts.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "streamifier": "^0.1.1"
+  }
+}
