@@ -58,6 +58,7 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+app.set('trust proxy', 1);
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 min
     max: 200, // per IP across all routes
