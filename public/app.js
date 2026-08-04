@@ -144,7 +144,7 @@ async function openProjectModal(slug) {
 async function loadFeaturedProjects() {
     const grid = document.getElementById('fp'); if (!grid) return;
     try {
-        const d = await (await fetch('/api/projects?limit=4')).json(), projects = d.projects || [];
+        const d = await (await fetch('/api/projects?limit=3')).json(), projects = d.projects || [];
         if (!projects.length) { grid.innerHTML = '<div class="empty-state"><i class="fas fa-code"></i><h3>No projects yet</h3><p>Check back soon for updates.</p></div>'; return; }
         grid.innerHTML = projects.map(p => renderProjectCard(p)).join('');
         document.querySelectorAll('#fp .project-card').forEach(card => { card.addEventListener('click', function(e) { e.preventDefault(); const slug = this.dataset.slug; if (slug) openProjectModal(slug); }); });
@@ -202,7 +202,7 @@ function initMaterialSearch() { const si = document.getElementById('materialsSea
 
 async function loadLatestMaterials() {
     const list = document.getElementById('lm'); if (!list) return;
-    try { const d = await (await fetch('/api/materials?limit=6')).json(); if (!d.materials?.length) { list.innerHTML = '<div class="empty-state"><p>No materials yet.</p></div>'; return; } list.innerHTML = d.materials.map((m, i) => renderMaterialRow(m, i)).join(''); attachMaterialEvents(); } catch (e) { list.innerHTML = ''; }
+    try { const d = await (await fetch('/api/materials?limit=5')).json(); if (!d.materials?.length) { list.innerHTML = '<div class="empty-state"><p>No materials yet.</p></div>'; return; } list.innerHTML = d.materials.map((m, i) => renderMaterialRow(m, i)).join(''); attachMaterialEvents(); } catch (e) { list.innerHTML = ''; }
 }
 
 async function openMaterialModal(slug) {
