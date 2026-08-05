@@ -20,6 +20,9 @@ const bcrypt = require('bcryptjs');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+const sharp = require('sharp');
+
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -58,7 +61,6 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
-app.set('trust proxy', 1);
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 min
     max: 200, // per IP across all routes
@@ -188,6 +190,10 @@ const DownloadLog = mongoose.model('DownloadLog', downloadLogSchema);
 let gfs;
 mongoose.connection.once('open', () => {
     gfs = new GridFSBucket(mongoose.connection.db, { bucketName: 'materials' });
+    
+    mongoose.connection.db.collection('materials.chunks').createIndex({ files_id: 1, n: 1 }).catch(() => {});
+    
+    console.log('GridFS ready');
 });
 
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/portfolio')
@@ -327,6 +333,8 @@ app.get('/api/projects/share/:shareableLink', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
+
 app.get('/api/materials', async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
@@ -337,7 +345,13 @@ app.get('/api/materials', async (req, res) => {
         if (req.query.subject) query.subject = { $regex: req.query.subject, $options: 'i' };
         if (req.query.grade) query.grade = req.query.grade;
         if (req.query.featured) query.isFeatured = true;
-        if (req.query.search) query.$or = [{ title: { $regex: req.query.search, $options: 'i' } }, { description: { $regex: req.query.search, $options: 'i' } }, { subject: { $regex: req.query.search, $options: 'i' } }];
+        if (req.query.search) {
+            query.$or = [
+                { title: { $regex: req.query.search, $options: 'i' } },
+                { description: { $regex: req.query.search, $options: 'i' } },
+                { subject: { $regex: req.query.search, $options: 'i' } }
+            ];
+        }
         const [materials, total] = await Promise.all([
             Material.find(query).populate('category', 'name slug color').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
             Material.countDocuments(query)
@@ -370,21 +384,48 @@ app.get('/api/materials/share/:shareableLink', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/materials/id/:id/download', downloadLimiter, async (req, res) => {
+app.get('/api/materials/id/:id/download', async (req, res) => {
     try {
         const material = await Material.findById(req.params.id);
         if (!material) return res.status(404).json({ error: 'Not found' });
+        
         if (material.storage === 'mongo' && material.fileId && gfs) {
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename="${material.fileName || 'download.pdf'}"`);
-            gfs.openDownloadStream(new mongoose.Types.ObjectId(material.fileId)).pipe(res);
-        } else if (material.fileUrl) {
-            res.redirect(material.fileUrl);
-        } else {
-            return res.status(404).json({ error: 'No file' });
+            try {
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `attachment; filename="${material.fileName || 'download.pdf'}"`);
+                const chunks = mongoose.connection.db.collection('materials.chunks');
+                const cursor = chunks.find({ files_id: new mongoose.Types.ObjectId(material.fileId) }).sort({ n: 1 }).allowDiskUse();
+                for await (const chunk of cursor) { res.write(chunk.data.buffer); }
+                res.end();
+                Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
+                DownloadLog.create({ material: material._id, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
+                return;
+            } catch (gridErr) {
+                console.error('GridFS error:', gridErr.message);
+            }
         }
-        Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
-        DownloadLog.create({ material: material._id, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
+        
+        if (material.fileUrl) {
+            Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
+            DownloadLog.create({ material: material._id, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
+            
+            try {
+                const response = await fetch(material.fileUrl);
+                if (!response.ok) throw new Error('Fetch failed');
+                
+                const contentType = response.headers.get('content-type') || 'application/pdf';
+                res.setHeader('Content-Type', contentType);
+                res.setHeader('Content-Disposition', `attachment; filename="${material.fileName || 'download.pdf'}"`);
+                
+                const buffer = await response.arrayBuffer();
+                res.send(Buffer.from(buffer));
+                return;
+            } catch (fetchErr) {
+                return res.redirect(material.fileUrl);
+            }
+        }
+        
+        return res.status(404).json({ error: 'No file' });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -458,35 +499,275 @@ app.delete('/api/admin/projects/:id', requireAuth, requireVerified, async (req, 
     try { await Project.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+const LOGO_PATH = path.join(__dirname, 'public', 'assets', 'watermark-logo.png');
+let logoBufferCache = null;
+let watermarkMarkCache = null; // final logo+halo composite, cached
+
+// Step 1: strip the black background from your source logo
+async function getLogoBuffer() {
+    if (logoBufferCache) return logoBufferCache;
+    const raw = sharp(LOGO_PATH).ensureAlpha();
+    const { data, info } = await raw.raw().toBuffer({ resolveWithObject: true });
+    const channels = info.channels;
+    const bgThreshold = 25;
+    for (let i = 0; i < data.length; i += channels) {
+        if (data[i] < bgThreshold && data[i + 1] < bgThreshold && data[i + 2] < bgThreshold) {
+            data[i + 3] = 0;
+        }
+    }
+    logoBufferCache = await sharp(data, { raw: { width: info.width, height: info.height, channels } }).png().toBuffer();
+    return logoBufferCache;
+}
+
+// Step 2: build a dark halo behind the logo shape (gives contrast on white/light backgrounds)
+async function createHalo(baseLogoBuffer, blurAmount = 10) {
+    const { data, info } = await sharp(baseLogoBuffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width, height, channels } = info;
+    const silhouette = Buffer.alloc(data.length);
+    for (let i = 0; i < data.length; i += channels) {
+        silhouette[i] = 0; silhouette[i + 1] = 0; silhouette[i + 2] = 0;
+        silhouette[i + 3] = data[i + 3]; // keep the shape, force color to black
+    }
+    return sharp(silhouette, { raw: { width, height, channels } }).blur(blurAmount).png().toBuffer();
+}
+
+// Reduces alpha of a PNG buffer by a factor (0-1)
+async function fadeLogo(buffer, opacityFactor) {
+    const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+    const channels = info.channels;
+    for (let i = 3; i < data.length; i += channels) {
+        data[i] = Math.round(data[i] * opacityFactor);
+    }
+    return sharp(data, { raw: { width: info.width, height: info.height, channels } }).png().toBuffer();
+}
+
+// Step 3: bake halo + logo into ONE flattened mark, used everywhere (images AND pdf)
+async function getWatermarkMark() {
+    if (watermarkMarkCache) return watermarkMarkCache;
+    const baseLogo = await getLogoBuffer();
+    const logoMeta = await sharp(baseLogo).metadata();
+
+    // pad canvas so the blurred halo isn't clipped at the edges
+    const pad = 40;
+    const canvasW = logoMeta.width + pad * 2;
+    const canvasH = logoMeta.height + pad * 2;
+
+    const halo = await createHalo(baseLogo, 12);
+    const fadedHalo = await fadeLogo(halo, 0.6); // dark, semi-opaque halo for contrast
+
+    watermarkMarkCache = await sharp({
+        create: { width: canvasW, height: canvasH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } }
+    })
+        .composite([
+            { input: fadedHalo, top: pad, left: pad },
+            { input: baseLogo, top: pad, left: pad }
+        ])
+        .png()
+        .toBuffer();
+
+    return watermarkMarkCache;
+}
+
+async function addPDFWatermark(inputPath, outputPath) {
+    try {
+        if (!fs.existsSync(inputPath)) return inputPath;
+
+        const existingPdfBytes = fs.readFileSync(inputPath);
+        const pdfDoc = await PDFDocument.load(existingPdfBytes);
+        const pages = pdfDoc.getPages();
+        const markBuffer = await getWatermarkMark();
+        const markPng = await sharp(markBuffer).png().toBuffer();
+        const embeddedMark = await pdfDoc.embedPng(markPng);
+        const markAspect = embeddedMark.width / embeddedMark.height;
+
+        for (const page of pages) {
+            const { width, height } = page.getSize();
+
+            // 1. Diagonal repeated tile — anti-crop
+            const tileW = Math.min(width, height) * 0.22;
+            const tileH = tileW / markAspect;
+            for (let x = -tileW; x < width + tileW; x += tileW * 1.5) {
+                for (let y = -tileH; y < height + tileH; y += tileH * 1.7) {
+                    page.drawImage(embeddedMark, {
+                        x, y, width: tileW, height: tileH,
+                        opacity: 0.14,
+                        rotate: { type: 'degrees', angle: -30 }
+                    });
+                }
+            }
+
+            // 2. Big centered logo mark
+            const centerW = Math.min(width, height) * 0.5;
+            const centerH = centerW / markAspect;
+            page.drawImage(embeddedMark, {
+                x: (width - centerW) / 2,
+                y: (height - centerH) / 2,
+                width: centerW,
+                height: centerH,
+                opacity: 0.24
+            });
+
+            // 3. Corner mark — bottom right, sharp and legible
+            const cornerW = Math.min(width, height) * 0.13;
+            const cornerH = cornerW / markAspect;
+            page.drawImage(embeddedMark, {
+                x: width - cornerW - 18,
+                y: 18,
+                width: cornerW,
+                height: cornerH,
+                opacity: 0.7
+            });
+        }
+
+        const pdfBytes = await pdfDoc.save();
+        fs.writeFileSync(outputPath, pdfBytes);
+        return outputPath;
+    } catch (err) {
+        console.error('PDF watermark error:', err.message);
+        return inputPath;
+    }
+}
+
+
+async function addImageWatermark(inputPath, outputPath) {
+    try {
+        const image = sharp(inputPath);
+        const metadata = await image.metadata();
+        const { width, height } = metadata;
+        const mark = await getWatermarkMark();
+        const markMeta = await sharp(mark).metadata();
+        const markAspect = markMeta.width / markMeta.height;
+
+        const composites = [];
+
+        // 1. Repeated diagonal tile (anti-crop) — bigger and clearer than before
+        const tileW = Math.round(Math.min(width, height) * 0.32);
+        const tileH = Math.round(tileW / markAspect);
+        const tileMark = await sharp(mark)
+            .resize(tileW, tileH, { fit: 'fill' })
+            .rotate(-30, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+            .toBuffer();
+        const fadedTile = await fadeLogo(tileMark, 0.16);
+        const tileMeta = await sharp(fadedTile).metadata();
+        const spacingX = tileMeta.width * 1.5;
+        const spacingY = tileMeta.height * 1.7;
+        for (let y = -tileMeta.height; y < height + tileMeta.height; y += spacingY) {
+            for (let x = -tileMeta.width; x < width + tileMeta.width; x += spacingX) {
+                composites.push({ input: fadedTile, top: Math.round(y), left: Math.round(x) });
+            }
+        }
+
+        // 2. Big centered mark — the main watermark, clearly visible
+        const centerW = Math.round(Math.min(width, height) * 0.55);
+        const centerH = Math.round(centerW / markAspect);
+        const centerMark = await sharp(mark).resize(centerW, centerH, { fit: 'fill' }).toBuffer();
+        const fadedCenter = await fadeLogo(centerMark, 0.32);
+        const centerMeta = await sharp(fadedCenter).metadata();
+        composites.push({
+            input: fadedCenter,
+            top: Math.round((height - centerMeta.height) / 2),
+            left: Math.round((width - centerMeta.width) / 2)
+        });
+
+        // 3. Corner mark — sharper, clearly ownership-branded
+        const cornerW = Math.round(Math.min(width, height) * 0.2);
+        const cornerH = Math.round(cornerW / markAspect);
+        const cornerMark = await sharp(mark).resize(cornerW, cornerH, { fit: 'fill' }).toBuffer();
+        const fadedCorner = await fadeLogo(cornerMark, 0.75);
+        const cornerMeta = await sharp(fadedCorner).metadata();
+        composites.push({
+            input: fadedCorner,
+            top: height - cornerMeta.height - 20,
+            left: width - cornerMeta.width - 20
+        });
+
+        await image.composite(composites).toFile(outputPath);
+        return outputPath;
+    } catch (err) {
+        console.error('Image watermark error:', err.message);
+        return inputPath;
+    }
+}
+
+
 app.post('/api/admin/materials', requireAuth, requireVerified, upload.single('file'), async (req, res) => {
     try {
         const data = { ...req.body, downloadable: req.body.downloadable !== 'false' };
+        const addWatermark = req.body.addWatermark === 'true' || req.body.addWatermark === true;
+        
         if (req.file) {
             const file = req.file;
+            let finalPath = file.path;
+            
+            if (addWatermark) {
+                const watermarkedPath = file.path + '_watermarked';
+                
+                if (file.mimetype === 'application/pdf') {
+                    finalPath = await addPDFWatermark(file.path, watermarkedPath + '.pdf');
+                } else if (file.mimetype.startsWith('image/')) {
+                    finalPath = await addImageWatermark(file.path, watermarkedPath + '.png');
+                }
+            }
+            
             if (file.mimetype === 'application/pdf' && gfs) {
                 const stream = gfs.openUploadStream(file.originalname, { contentType: file.mimetype });
-                fs.createReadStream(file.path).pipe(stream);
+                fs.createReadStream(finalPath).pipe(stream);
                 await new Promise((resolve, reject) => { stream.on('finish', resolve); stream.on('error', reject); });
-                data.storage = 'mongo'; data.fileId = stream.id; data.fileName = file.originalname; data.fileSize = file.size; data.type = 'pdf';
+                data.storage = 'mongo'; data.fileId = stream.id; data.fileName = file.originalname; data.fileSize = fs.statSync(finalPath).size; data.type = 'pdf';
             } else if (file.mimetype.startsWith('image/')) {
-                const result = await cloudinary.uploader.upload(file.path, { folder: 'portfolio/materials' });
-                data.storage = 'cloudinary'; data.fileUrl = result.secure_url; data.fileName = file.originalname; data.fileSize = file.size; data.type = 'image';
+                const result = await cloudinary.uploader.upload(finalPath, { folder: 'portfolio/materials' });
+                data.storage = 'cloudinary'; data.fileUrl = result.secure_url; data.fileName = file.originalname; data.fileSize = fs.statSync(finalPath).size; data.type = 'image';
             } else {
-                const result = await cloudinary.uploader.upload(file.path, { folder: 'portfolio/materials', resource_type: 'auto' });
-                data.storage = 'cloudinary'; data.fileUrl = result.secure_url; data.fileName = file.originalname; data.fileSize = file.size;
+                const result = await cloudinary.uploader.upload(finalPath, { folder: 'portfolio/materials', resource_type: 'auto' });
+                data.storage = 'cloudinary'; data.fileUrl = result.secure_url; data.fileName = file.originalname; data.fileSize = fs.statSync(finalPath).size;
             }
+            
             fs.unlink(file.path, () => {});
+            if (finalPath !== file.path) fs.unlink(finalPath, () => {});
+            
         } else if (req.body.externalLink) {
             data.storage = 'external-link'; data.fileUrl = req.body.externalLink; data.type = 'link';
         }
+        
         const material = new Material(data);
         await material.save();
         res.status(201).json(await Material.findById(material._id).populate('category', 'name slug'));
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.put('/api/admin/materials/:id', requireAuth, requireVerified, async (req, res) => {
-    try { res.json(await Material.findByIdAndUpdate(req.params.id, req.body, { new: true }).populate('category', 'name slug')); } catch (err) { res.status(400).json({ error: err.message }); }
+app.put('/api/admin/materials/:id', requireAuth, requireVerified, upload.single('file'), async (req, res) => {
+    try {
+        const updates = { ...req.body, updatedAt: new Date() };
+        
+        if (req.file) {
+            const result = await cloudinary.uploader.upload(req.file.path, {
+                folder: 'portfolio/materials',
+                resource_type: req.file.mimetype === 'application/pdf' ? 'raw' : 'auto'
+            });
+            updates.storage = 'cloudinary';
+            updates.fileUrl = result.secure_url;
+            updates.fileName = req.file.originalname;
+            updates.fileSize = req.file.size;
+            updates.type = req.file.mimetype === 'application/pdf' ? 'pdf' : 'image';
+            fs.unlink(req.file.path, () => {});
+        }
+        
+        if (updates.externalLink) {
+            updates.storage = 'external-link';
+            updates.fileUrl = updates.externalLink;
+            updates.type = 'link';
+        }
+        
+        const material = await Material.findByIdAndUpdate(
+            req.params.id,
+            { $set: updates },
+            { new: true }
+        ).populate('category', 'name slug');
+        
+        if (!material) return res.status(404).json({ error: 'Not found' });
+        
+        res.json(material);
+    } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.delete('/api/admin/materials/:id', requireAuth, requireVerified, async (req, res) => {
