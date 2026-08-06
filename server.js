@@ -249,6 +249,29 @@ function requireVerified(req, res, next) {
     res.redirect('/admin-verify');
 }
 
+async function sendTelegramNotification(name, email, subject, message) {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    
+    if (!botToken || !chatId) return;
+    
+    const text = `📬 *New Message from CODE & CLASSROOM*\n\n👤 *Name:* ${name}\n📧 *Email:* ${email}\n📝 *Subject:* ${subject || 'N/A'}\n💬 *Message:* ${message}\n📅 *Date:* ${new Date().toLocaleString()}`;
+    
+    try {
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: text,
+                parse_mode: 'Markdown'
+            })
+        });
+    } catch (err) {
+        console.error('Telegram notification failed:', err.message);
+    }
+}
+
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account' }));
 app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login?error=1' }), (req, res) => res.redirect('/admin-verify'));
 app.post('/auth/verify', authLimiter, async (req, res) => {
@@ -431,11 +454,37 @@ app.get('/api/materials/id/:id/download', async (req, res) => {
 
 app.post('/api/messages', contactLimiter, async (req, res) => {
     try {
-        if (req.body.website) return res.status(200).json({ success: true }); 
+        if (req.body.website) return res.status(200).json({ success: true });
         const { name, email, subject, message } = req.body;
+        
         if (!name || !email || !message) return res.status(400).json({ error: 'Missing required fields' });
-        await Message.create({ name, email, subject, message });
-        res.json({ success: true });
+        
+        if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Name must be between 2 and 100 characters.' });
+        
+        if (message.length < 10 || message.length > 5000) return res.status(400).json({ error: 'Message must be between 10 and 5000 characters.' });
+        
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) return res.status(400).json({ error: 'Please provide a valid email address.' });
+        
+        const disposableDomains = ['mailinator.com', 'tempmail.com', 'guerrillamail.com', '10minutemail.com', 'yopmail.com', 'throwaway.email', 'temp-mail.org', 'sharklasers.com', 'trashmail.com', 'maildrop.cc'];
+        const domain = email.split('@')[1]?.toLowerCase();
+        if (disposableDomains.includes(domain)) return res.status(400).json({ error: 'Disposable email addresses are not allowed. Please use a real email.' });
+        
+        const linkCount = (message.match(/https?:\/\//gi) || []).length;
+        if (linkCount > 3) return res.status(400).json({ error: 'Too many links in message.' });
+        
+        const recentDuplicate = await Message.findOne({
+            email: email.toLowerCase(),
+            message: message,
+            createdAt: { $gte: new Date(Date.now() - 3600000) }
+        });
+        if (recentDuplicate) return res.status(200).json({ success: true, message: 'Message sent!' });
+        
+        await Message.create({ name: name.trim(), email: email.toLowerCase().trim(), subject: subject?.trim() || '', message: message.trim() });
+        
+        sendTelegramNotification(name, email, subject, message);
+        
+        res.json({ success: true, message: 'Message sent successfully!' });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
