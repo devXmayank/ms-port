@@ -895,6 +895,13 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
                 return res.json({ reply: "I'm unable to help with that. I'm here for study materials and projects." });
             }
         }
+
+        const offTopicPatterns = ['resistance', 'circuit', 'diagram', 'medicine', 'disease', 'political', 'religion', 'war', 'violence', 'hack', 'crack', 'torrent', 'pirate', 'adult', 'gambling', 'crypto', 'trading', 'stock'];
+        for (const pattern of offTopicPatterns) {
+            if (lower.includes(pattern)) {
+                return res.json({ reply: "I'm here to help with study materials and projects on CODE & CLASSROOM. What subject or topic are you looking for?" });
+            }
+        }
         
         let action = null;
         if (lower.includes('scroll') || lower.includes('go to') || lower.includes('navigate')) {
@@ -910,26 +917,22 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         if (GROQ_API_KEY && GROQ_API_KEY.startsWith('gsk_')) {
             try {
                 let materials = [], projects = [], categories = [];
-                const searchTriggers = ['find', 'search', 'looking', 'need', 'show me', 'list', 'recent', 'latest', 'help', 'what do you have', 'available'];
-                const projectTriggers = ['project', 'built', 'work', 'portfolio'];
-                const categoryTriggers = ['category', 'categories', 'subject', 'topic'];
                 
-                if (searchTriggers.some(t => lower.includes(t))) {
-                    const terms = lower.replace(new RegExp(searchTriggers.join('|'), 'gi'), '').trim();
-                    materials = terms.length > 1 
-                        ? await Material.find({ $or: [{ title: { $regex: terms, $options: 'i' } }, { subject: { $regex: terms, $options: 'i' } }, { description: { $regex: terms, $options: 'i' } }, { grade: { $regex: terms, $options: 'i' } }] }).populate('category', 'name slug').limit(8).lean()
-                        : await Material.find().populate('category', 'name slug').sort({ createdAt: -1 }).limit(6).lean();
-                }
-                if (projectTriggers.some(t => lower.includes(t)) || lower.includes('help') || lower.includes('what do you have')) {
-                    projects = await Project.find({ status: { $ne: 'disabled' } }).sort({ createdAt: -1 }).limit(6).lean();
-                }
-                if (categoryTriggers.some(t => lower.includes(t)) || lower.includes('help') || lower.includes('what do you have')) {
-                    categories = await Category.find({ isActive: true }).sort({ order: 1 }).lean();
+                materials = await Material.find().populate('category', 'name slug').sort({ createdAt: -1 }).limit(6).lean();
+                projects = await Project.find({ status: { $ne: 'disabled' } }).sort({ createdAt: -1 }).limit(4).lean();
+                categories = await Category.find({ isActive: true }).sort({ order: 1 }).lean();
+                
+                if (lower.includes('find') || lower.includes('search') || lower.includes('looking') || lower.includes('show') || lower.includes('list') || lower.includes('give') || lower.includes('link') || lower.includes('share')) {
+                    const terms = lower.replace(/find|search|looking for|need|want|show me|get me|do you have|i need|list|show|recent|latest|give|link|share/gi, '').trim();
+                    if (terms.length > 1) {
+                        const filtered = await Material.find({ $or: [{ title: { $regex: terms, $options: 'i' } }, { subject: { $regex: terms, $options: 'i' } }, { description: { $regex: terms, $options: 'i' } }, { grade: { $regex: terms, $options: 'i' } }] }).populate('category', 'name slug').limit(8).lean();
+                        if (filtered.length) materials = filtered;
+                    }
                 }
                 
                 let dbContext = '';
-                if (materials.length) dbContext += `\nMATERIALS:\n${materials.map(m => `- "${m.title}" | ${m.subject||'N/A'} | Grade ${m.grade||'N/A'} | ${m.examType||m.type} | Link: /materials?open=${m.slug}`).join('\n')}`;
-                if (projects.length) dbContext += `\nPROJECTS:\n${projects.map(p => `- "${p.title}" | ${p.status} | ${(p.techStack||[]).join(',')} | ${p.progress||0}%`).join('\n')}`;
+                if (materials.length) dbContext += `\nMATERIALS:\n${materials.map(m => `- "${m.title}" | ${m.subject||'N/A'} | Grade ${m.grade||'N/A'} | Type: ${m.examType||m.type} | Open link: /materials?open=${m.slug} | Shareable link: /s/${m.shareableLink||m.slug}`).join('\n')}`;
+                if (projects.length) dbContext += `\nPROJECTS:\n${projects.map(p => `- "${p.title}" | Status: ${p.status} | Progress: ${p.progress||0}% | Tech: ${(p.techStack||[]).join(', ')}`).join('\n')}`;
                 if (categories.length) dbContext += `\nCATEGORIES:\n${categories.map(c => `- ${c.name}: ${c.description||''} | Link: /materials?category=${c.slug}`).join('\n')}`;
                 if (history?.length) dbContext += `\nHISTORY:\n${history.slice(-6).map(h => `${h.role}: ${h.content}`).join('\n')}`;
                 
@@ -940,7 +943,13 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` },
                     body: JSON.stringify({
                         model: 'llama-3.1-8b-instant',
-                        messages: [{ role: 'user', content: `You are Cypher, a professional AI study assistant for CODE & CLASSROOM by Mayank Sagar (12th grade, India). Professional English only. Short replies (2-4 sentences). Use **bold**, *italic*, [links](URL). Share socials: Instagram [@sagar.mayank_](https://instagram.com/sagar.mayank_), GitHub [cypherXsagar](https://github.com/cypherXsagar). Never share credentials/code. List real items with links when asked.${dbContext}\nUser: ${message}\nCypher:` }],
+                        messages: [{ role: 'user', content: `You are Cypher, a helpful AI assistant for CODE & CLASSROOM by Mayank Sagar. You have access to the real database below. Always use the database data when answering. If someone asks for materials, projects, or links, use the data provided. When listing materials, always include the shareable link as a clickable link using the format [material title](/s/xxx). Never say you don't have access to links or that you can't share links because you have the links right in the database. Never make up fake materials or claim you've sent something since you cannot send anything. Keep replies short, using 2 to 4 sentences. Use **bold**, *italic*, and [links](URL) formatting. Use only professional English with no Hindi. Share socials only when asked: Instagram [@sagar.mayank_](https://instagram.com/sagar.mayank_) and GitHub [cypherXsagar](https://github.com/cypherXsagar). Never share credentials or code.
+
+${dbContext}
+
+User: ${message}
+
+Cypher:` }],
                         max_tokens: 400, temperature: 0.7
                     }),
                     signal: controller.signal
@@ -951,7 +960,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
                     let reply = data.choices[0].message.content.trim();
                     if (reply && reply.length > 5) {
                         if (!reply.match(/[.!?)]$/)) reply += '.';
-                        const slangCheck = ['bhai', 'tera', 'badhiya', 'accha', 'yaar', 'arey', 'kya baat', 'bilkul', 'aur bhai'];
+                        const slangCheck = ['bhai', 'tera', 'badhiya', 'accha', 'yaar', 'arey', 'kya baat', 'bilkul', 'aur bhai', 'ji', 'app', 'mereko', 'skte'];
                         if (slangCheck.some(w => reply.toLowerCase().includes(w))) reply = "Hello! I'm Cypher. How can I help you with study materials or projects today?";
                         const result = { reply };
                         if (action) result.action = action;
@@ -976,15 +985,15 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
                     Category.find({ isActive: true }).sort({ order: 1 }).lean()
                 ]);
                 reply = "Here's what's available:\n\n";
-                if (mats.length) reply += `📚 **Recent Materials:**\n${mats.map(m => `• **${m.title}** ${m.subject ? `*(${m.subject})*` : ''}\n  [View →](/materials?open=${m.slug})`).join('\n')}\n\n`;
+                if (mats.length) reply += `📚 **Recent Materials:**\n${mats.map(m => `• **${m.title}** ${m.subject ? `*(${m.subject})*` : ''}\n  [View →](/materials?open=${m.slug}) | [Share →](/s/${m.shareableLink||m.slug})`).join('\n')}\n\n`;
                 if (projs.length) reply += `🚀 **Recent Projects:**\n${projs.map(p => `• **${p.title}** — *${(p.status||'planning').replace('-',' ')}*`).join('\n')}\n  [View all →](/projects)\n\n`;
                 if (cats.length) reply += `📂 **Categories:** ${cats.map(c => `[${c.name}](/materials?category=${c.slug})`).join(' | ')}\n\nI can search for specific topics — just ask!`;
             } catch (e) { reply = "I can find materials, show projects, and navigate the site. Just ask!"; }
-        } else if (lower.includes('find') || lower.includes('search') || lower.includes('looking') || lower.includes('show') || lower.includes('list') || lower.includes('recent') || lower.includes('latest')) {
-            const terms = lower.replace(/find|search|looking for|need|want|show me|get me|do you have|i need|list|show|recent|latest/gi, '').trim();
+        } else if (lower.includes('find') || lower.includes('search') || lower.includes('looking') || lower.includes('show') || lower.includes('list') || lower.includes('recent') || lower.includes('latest') || lower.includes('give') || lower.includes('link') || lower.includes('share')) {
+            const terms = lower.replace(/find|search|looking for|need|want|show me|get me|do you have|i need|list|show|recent|latest|give|link|share/gi, '').trim();
             try {
                 let results = terms.length > 1 ? await Material.find({ $or: [{ title: { $regex: terms, $options: 'i' } }, { subject: { $regex: terms, $options: 'i' } }] }).populate('category', 'name slug').limit(8).lean() : await Material.find().populate('category', 'name slug').sort({ createdAt: -1 }).limit(6).lean();
-                reply = results.length ? `📚 **Found:**\n\n${results.map(m => `• **${m.title}** ${m.subject ? `*(${m.subject})*` : ''}${m.grade ? ` - Grade ${m.grade}` : ''}\n  [View →](/materials?open=${m.slug})`).join('\n\n')}` : `Nothing for *"${terms}"*. Try **[Materials](/materials)**.`;
+                reply = results.length ? `📚 **Found:**\n\n${results.map(m => `• **${m.title}** ${m.subject ? `*(${m.subject})*` : ''}${m.grade ? ` - Grade ${m.grade}` : ''}\n  [View →](/materials?open=${m.slug}) | [Share →](/s/${m.shareableLink||m.slug})`).join('\n\n')}` : `Nothing found for *"${terms}"*. Try **[Materials](/materials)**.`;
             } catch (e) { reply = "Visit **[Materials](/materials)**."; }
         } else if (lower.includes('project') || lower.includes('built') || lower.includes('work')) {
             try {
