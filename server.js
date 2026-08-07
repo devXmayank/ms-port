@@ -412,6 +412,15 @@ app.get('/api/materials/id/:id/download', async (req, res) => {
         const material = await Material.findById(req.params.id);
         if (!material) return res.status(404).json({ error: 'Not found' });
         
+        const visitorIP = req.ip || req.connection.remoteAddress;
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        
+        const alreadyDownloaded = await DownloadLog.findOne({
+            material: material._id,
+            ip: visitorIP,
+            timestamp: { $gte: today }
+        });
+        
         if (material.storage === 'mongo' && material.fileId && gfs) {
             try {
                 res.setHeader('Content-Type', 'application/pdf');
@@ -420,26 +429,27 @@ app.get('/api/materials/id/:id/download', async (req, res) => {
                 const cursor = chunks.find({ files_id: new mongoose.Types.ObjectId(material.fileId) }).sort({ n: 1 }).allowDiskUse();
                 for await (const chunk of cursor) { res.write(chunk.data.buffer); }
                 res.end();
-                Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
-                DownloadLog.create({ material: material._id, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
+                
+                if (!alreadyDownloaded) {
+                    Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
+                }
+                DownloadLog.create({ material: material._id, ip: visitorIP, userAgent: req.headers['user-agent'] }).catch(() => {});
                 return;
-            } catch (gridErr) {
-                console.error('GridFS error:', gridErr.message);
-            }
+            } catch (gridErr) {}
         }
         
         if (material.fileUrl) {
-            Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
-            DownloadLog.create({ material: material._id, ip: req.ip, userAgent: req.headers['user-agent'] }).catch(() => {});
+            if (!alreadyDownloaded) {
+                Material.findByIdAndUpdate(req.params.id, { $inc: { downloads: 1 } }).catch(() => {});
+            }
+            DownloadLog.create({ material: material._id, ip: visitorIP, userAgent: req.headers['user-agent'] }).catch(() => {});
             
             try {
                 const response = await fetch(material.fileUrl);
                 if (!response.ok) throw new Error('Fetch failed');
-                
                 const contentType = response.headers.get('content-type') || 'application/pdf';
                 res.setHeader('Content-Type', contentType);
                 res.setHeader('Content-Disposition', `attachment; filename="${material.fileName || 'download.pdf'}"`);
-                
                 const buffer = await response.arrayBuffer();
                 res.send(Buffer.from(buffer));
                 return;
