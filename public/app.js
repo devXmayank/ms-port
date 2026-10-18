@@ -9,13 +9,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('cg')) loadCategories();
     if (document.getElementById('fp')) loadFeaturedProjects();
     if (document.getElementById('projectsGrid')) { loadProjects(); initProjectFilters(); }
-    if (document.getElementById('materialsList')) { loadMaterials(); initMaterialFilters(); }
+    if (document.getElementById('materialsList')) { loadMaterials(); initMaterialFilters(); initCategoryPills(); }
     if (document.getElementById('materialsSearch')) initMaterialSearch();
     if (document.getElementById('contactForm')) initContactForm();
     if (document.getElementById('lm')) loadLatestMaterials();
     initAIChat();
     initScrollAnimations();
     initSmoothScroll();
+    initDownloadToast();
 });
 
 function initNavbar() {
@@ -43,16 +44,12 @@ function initHero3D() {
     const light = new THREE.PointLight(0xc9a668, 1.2, 20); light.position.set(5, 5, 5); scene.add(light);
     scene.add(new THREE.AmbientLight(0xffffff, 0.3));
     const group = new THREE.Group(); scene.add(group);
-    const coreGeo = new THREE.IcosahedronGeometry(1.15, 0);
-    const core = new THREE.Mesh(coreGeo, new THREE.MeshPhysicalMaterial({ color: 0xc9a668, metalness: 0.7, roughness: 0.15, transparent: true, opacity: 0.55, flatShading: true, clearcoat: 0.6 }));
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.15, 0), new THREE.MeshPhysicalMaterial({ color: 0xc9a668, metalness: 0.7, roughness: 0.15, transparent: true, opacity: 0.55, flatShading: true, clearcoat: 0.6 }));
     group.add(core);
     const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(1.22, 0), new THREE.MeshBasicMaterial({ color: 0xe8d5a3, wireframe: true, transparent: true, opacity: 0.25 }));
     group.add(shell);
     const nodeCount = 60, radius = 2.3, nodes = [];
-    for (let i = 0; i < nodeCount; i++) {
-        const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), r = radius + (Math.random() - 0.5) * 0.6;
-        nodes.push(new THREE.Vector3(r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph)));
-    }
+    for (let i = 0; i < nodeCount; i++) { const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), r = radius + (Math.random() - 0.5) * 0.6; nodes.push(new THREE.Vector3(r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph))); }
     const nodeGeo = new THREE.BufferGeometry().setFromPoints(nodes);
     const nodePts = new THREE.Points(nodeGeo, new THREE.PointsMaterial({ color: 0xc9a668, size: 0.045, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
     group.add(nodePts);
@@ -80,11 +77,7 @@ function initHero3D() {
         core.scale.setScalar(1 + Math.sin(Date.now() * 0.0006) * 0.03);
         renderer.render(scene, camera);
     })();
-    if (window.gsap && window.ScrollTrigger) {
-        gsap.registerPlugin(ScrollTrigger);
-        gsap.to(group.scale, { scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 1.5 }, x: 0.5, y: 0.5, z: 0.5, ease: 'none' });
-        gsap.to('#hc', { scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 1 }, opacity: 0, y: 150 });
-    }
+    if (window.gsap && window.ScrollTrigger) { gsap.registerPlugin(ScrollTrigger); gsap.to(group.scale, { scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 1.5 }, x: 0.5, y: 0.5, z: 0.5, ease: 'none' }); gsap.to('#hc', { scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 1 }, opacity: 0, y: 150 }); }
 }
 
 async function loadStats() {
@@ -97,32 +90,44 @@ function animateValue(id, start, end, duration) {
     (function upd(ct) { const p = Math.min((ct - st) / duration, 1), v = Math.floor(start + (end - start) * (1 - Math.pow(1 - p, 3))); el.textContent = v.toLocaleString(); if (p < 1) requestAnimationFrame(upd); })(st);
 }
 
-async function loadCategoryFilters() {
+async function initCategoryPills() {
+    const box = document.getElementById('categoryFilters'); if (!box) return;
+    if (box.dataset.loaded === '1') return;
     try {
-        const res = await fetch('/api/categories'), categories = await res.json(), container = document.getElementById('categoryFilters');
-        if (!container) return;
-        if (Array.isArray(categories)) {
-            categories.forEach(cat => {
-                const btn = document.createElement('button');
-                btn.className = 'filter-pill material-filter-category'; btn.dataset.category = cat._id; btn.dataset.slug = cat.slug; btn.textContent = cat.name;
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.material-filter-category').forEach(b => b.classList.remove('active'));
-                    this.classList.add('active'); currentCategory = this.dataset.category; currentPage = 1; loadMaterials();
-                    document.getElementById('currentCategoryTitle').textContent = cat.name;
-                    document.getElementById('currentCategoryDesc').textContent = cat.description || 'Browse materials in this category.';
-                    const url = new URL(window.location); url.searchParams.set('category', cat.slug); window.history.pushState({}, '', url);
-                });
-                container.appendChild(btn);
+        const cats = await (await fetch('/api/categories')).json();
+        if (!Array.isArray(cats)) return;
+        cats.forEach(c => {
+            if (box.querySelector(`[data-slug="${c.slug}"]`)) return;
+            const btn = document.createElement('button');
+            btn.className = 'filter-pill material-filter-category';
+            btn.dataset.slug = c.slug;
+            btn.dataset.category = c.slug;
+            btn.textContent = c.name;
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.material-filter-category').forEach(x => x.classList.remove('active'));
+                btn.classList.add('active');
+                currentCategory = c.slug;
+                currentPage = 1;
+                loadMaterials();
+                const tt = document.getElementById('currentCategoryTitle'), dd = document.getElementById('currentCategoryDesc');
+                if (tt) tt.textContent = c.name;
+                if (dd) dd.textContent = c.description || 'Browse materials in this category.';
+                try { history.pushState({}, '', '/materials?category=' + c.slug); } catch (e) {}
             });
+            box.appendChild(btn);
+        });
+        box.dataset.loaded = '1';
+        const urlParams = new URLSearchParams(location.search), ac = urlParams.get('category');
+        if (ac) {
+            const active = box.querySelector(`[data-slug="${ac}"]`);
+            if (active) { box.querySelectorAll('.material-filter-category').forEach(x => x.classList.remove('active')); active.classList.add('active'); currentCategory = ac; }
         }
-        const urlParams = new URLSearchParams(window.location.search), activeCategory = urlParams.get('category');
-        if (activeCategory) { const activeBtn = container.querySelector(`[data-slug="${activeCategory}"]`); if (activeBtn) { activeBtn.classList.add('active'); currentCategory = activeBtn.dataset.category; } }
-    } catch (err) {}
+    } catch (e) {}
 }
 
 async function loadCategories() {
     const grid = document.getElementById('cg'); if (!grid) return;
-    try { const cats = await (await fetch('/api/categories')).json(); grid.innerHTML = cats.length ? cats.map(c => `<a href="/materials?category=${c.slug}" class="category-card"><div class="category-icon"><i class="fas fa-${c.icon||'folder'}"></i></div><h3>${esc(c.name)}</h3><p>${esc(c.description||'Browse materials')}</p><span class="category-count">Explore →</span></a>`).join('') : '<div class="empty-state"><i class="fas fa-folder-open"></i><h3>No categories</h3></div>'; } catch (e) { grid.innerHTML = '<div class="empty-state"><p>Failed to load.</p></div>'; }
+    try { const cats = await (await fetch('/api/categories')).json(); grid.innerHTML = cats.length ? cats.map(c => `<a href="/materials?category=${c.slug}" class="category-card"><div class="category-icon"><i class="fas fa-${c.icon || 'folder'}"></i></div><h3>${esc(c.name)}</h3><p>${esc(c.description || 'Browse materials')}</p><span class="category-count">Explore →</span></a>`).join('') : '<div class="empty-state"><i class="fas fa-folder-open"></i><h3>No categories</h3></div>'; } catch (e) { grid.innerHTML = '<div class="empty-state"><p>Failed to load.</p></div>'; }
 }
 
 async function openProjectModal(slug) {
@@ -132,7 +137,7 @@ async function openProjectModal(slug) {
         const p = await res.json(); if (p.error) { showToast('Project not found', 'error'); return; }
         const sb = s => ({ 'live': 'status-live', 'in-progress': 'status-in-progress', 'completed': 'status-completed', 'planning': 'status-planning', 'on-hold': 'status-on-hold', 'disabled': 'status-disabled' }[s] || '');
         const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
-        overlay.innerHTML = `<div class="modal" style="max-width:650px"><button class="modal-close">&times;</button>${p.thumbnail?`<img src="${p.thumbnail}" alt="${esc(p.title)}" style="width:100%;max-height:300px;object-fit:cover;border-radius:var(--radius);margin-bottom:20px">`:''}<span class="project-status ${sb(p.status)}" style="margin-bottom:12px;display:inline-block">${(p.status||'planning').replace('-',' ')}</span><h2 style="font-family:var(--font-display);font-size:28px;margin-bottom:12px">${esc(p.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(p.description||'')}</p>${p.longDescription?`<p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(p.longDescription)}</p>`:''}${p.progress>0?`<div style="margin-bottom:20px"><div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:12px"><span style="color:var(--text-dim)">Progress</span><span style="color:var(--accent)">${p.progress}%</span></div><div class="progress-bar-container"><div class="progress-bar" style="width:${p.progress}%"></div></div></div>`:''}${p.techStack&&p.techStack.length?`<div style="margin-bottom:20px"><h4 style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Tech Stack</h4><div style="display:flex;gap:6px;flex-wrap:wrap">${p.techStack.map(t=>`<span class="tech-tag">${esc(t)}</span>`).join('')}</div></div>`:''}<div style="display:flex;gap:16px;margin-bottom:20px;font-size:12px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${p.views||0} views</span><span>Created: ${new Date(p.createdAt).toLocaleDateString()}</span>${p.completedDate?`<span>Completed: ${new Date(p.completedDate).toLocaleDateString()}</span>`:''}</div><div style="display:flex;gap:10px;flex-wrap:wrap">${p.liveUrl?`<a href="${p.liveUrl}" target="_blank" rel="noopener" class="btn btn-primary"><i class="fas fa-external-link-alt"></i> Live Demo</a>`:''}${p.githubUrl?`<a href="${p.githubUrl}" target="_blank" rel="noopener" class="btn btn-outline"><i class="fab fa-github"></i> View Code</a>`:''}<button class="btn btn-outline modal-close-btn">Close</button></div></div>`;
+        overlay.innerHTML = `<div class="modal" style="max-width:650px"><button class="modal-close">&times;</button>${p.thumbnail ? `<img src="${p.thumbnail}" alt="${esc(p.title)}" style="width:100%;max-height:300px;object-fit:cover;border-radius:var(--radius);margin-bottom:20px">` : ''}<span class="project-status ${sb(p.status)}" style="margin-bottom:12px;display:inline-block">${(p.status || 'planning').replace('-', ' ')}</span><h2 style="font-family:var(--font-display);font-size:28px;margin-bottom:12px">${esc(p.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(p.description || '')}</p>${p.longDescription ? `<p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(p.longDescription)}</p>` : ''}${p.progress > 0 ? `<div style="margin-bottom:20px"><div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:12px"><span style="color:var(--text-dim)">Progress</span><span style="color:var(--accent)">${p.progress}%</span></div><div class="progress-bar-container"><div class="progress-bar" style="width:${p.progress}%"></div></div></div>` : ''}${p.techStack && p.techStack.length ? `<div style="margin-bottom:20px"><h4 style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Tech Stack</h4><div style="display:flex;gap:6px;flex-wrap:wrap">${p.techStack.map(t => `<span class="tech-tag">${esc(t)}</span>`).join('')}</div></div>` : ''}<div style="display:flex;gap:16px;margin-bottom:20px;font-size:12px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${p.views || 0} views</span><span>Created: ${new Date(p.createdAt).toLocaleDateString()}</span></div><div style="display:flex;gap:10px;flex-wrap:wrap">${p.liveUrl ? `<a href="${p.liveUrl}" target="_blank" rel="noopener" class="btn btn-primary"><i class="fas fa-external-link-alt"></i> Live Demo</a>` : ''}${p.githubUrl ? `<a href="${p.githubUrl}" target="_blank" rel="noopener" class="btn btn-outline"><i class="fab fa-github"></i> View Code</a>` : ''}<button class="btn btn-outline modal-close-btn">Close</button></div></div>`;
         document.body.appendChild(overlay); document.body.style.overflow = 'hidden';
         const closeIt = () => { overlay.remove(); document.body.style.overflow = ''; };
         overlay.querySelector('.modal-close').addEventListener('click', closeIt); overlay.querySelector('.modal-close-btn').addEventListener('click', closeIt);
@@ -165,7 +170,7 @@ async function loadProjects() {
 
 function renderProjectCard(p) {
     const sb = s => ({ 'live': 'status-live', 'in-progress': 'status-in-progress', 'completed': 'status-completed', 'planning': 'status-planning', 'on-hold': 'status-on-hold', 'disabled': 'status-disabled' }[s] || '');
-    return `<div class="project-card" data-slug="${p.slug||''}" style="cursor:pointer">${p.thumbnail?`<img src="${p.thumbnail}" alt="${esc(p.title)}" class="project-thumbnail" loading="lazy">`:`<div class="project-thumbnail-placeholder"><i class="fas fa-code"></i></div>`}<div class="project-body"><h3>${esc(p.title)}</h3><p>${esc(p.description||'').substring(0,120)}${(p.description||'').length>120?'...':''}</p><div class="project-meta"><div class="project-tech">${(p.techStack||[]).slice(0,3).map(t=>`<span class="tech-tag">${esc(t)}</span>`).join('')}</div><span class="project-status ${sb(p.status)}">${(p.status||'planning').replace('-',' ')}</span></div>${p.progress>0?`<div class="progress-bar-container"><div class="progress-bar" style="width:${p.progress}%"></div></div>`:''}</div></div>`;
+    return `<div class="project-card" data-slug="${p.slug || ''}" style="cursor:pointer">${p.thumbnail ? `<img src="${p.thumbnail}" alt="${esc(p.title)}" class="project-thumbnail" loading="lazy">` : `<div class="project-thumbnail-placeholder"><i class="fas fa-code"></i></div>`}<div class="project-body"><h3>${esc(p.title)}</h3><p>${esc(p.description || '').substring(0, 120)}${(p.description || '').length > 120 ? '...' : ''}</p><div class="project-meta"><div class="project-tech">${(p.techStack || []).slice(0, 3).map(t => `<span class="tech-tag">${esc(t)}</span>`).join('')}</div><span class="project-status ${sb(p.status)}">${(p.status || 'planning').replace('-', ' ')}</span></div>${p.progress > 0 ? `<div class="progress-bar-container"><div class="progress-bar" style="width:${p.progress}%"></div></div>` : ''}</div></div>`;
 }
 
 function initProjectFilters() { document.querySelectorAll('.project-filter').forEach(b => b.addEventListener('click', function() { document.querySelectorAll('.project-filter').forEach(x => x.classList.remove('active')); this.classList.add('active'); currentProjectStatus = this.dataset.status; currentPage = 1; loadProjects(); })); }
@@ -174,27 +179,38 @@ async function loadMaterials() {
     const list = document.getElementById('materialsList'); if (!list) return;
     list.innerHTML = '<div class="empty-state"><p>Loading...</p></div>';
     try {
-        let url = `/api/materials?page=${currentPage}&limit=20`; if (currentCategory !== 'all') url += `&category=${currentCategory}`; if (currentExamType !== 'all') url += `&examType=${currentExamType}`;
+        let url = `/api/materials?page=${currentPage}&limit=20`;
+        if (currentCategory !== 'all' && currentCategory) url += `&category=${encodeURIComponent(currentCategory)}`;
+        if (currentExamType !== 'all') url += `&examType=${currentExamType}`;
         const si = document.getElementById('materialsSearch'); if (si?.value.trim()) url += `&search=${encodeURIComponent(si.value.trim())}`;
         const d = await (await fetch(url)).json(); totalPages = d.pages;
         if (!d.materials.length) { list.innerHTML = '<div class="empty-state"><i class="fas fa-file-alt"></i><h3>No materials</h3></div>'; return; }
-        list.innerHTML = d.materials.map((m, i) => renderMaterialRow(m, i)).join(''); attachMaterialEvents(); renderPagination('materialsPagination', d.page, d.pages);
+        list.innerHTML = d.materials.map((m, i) => renderMaterialRow(m, i)).join('');
+        attachMaterialEvents();
+        renderPagination('materialsPagination', d.page, d.pages);
     } catch (e) { list.innerHTML = '<div class="empty-state"><p>Failed to load.</p></div>'; }
 }
 
 function renderMaterialRow(m, i) {
-    const hasFile = m.fileUrl || m.fileId, shareUrl = `${window.location.origin}/s/${m.shareableLink||m.slug}`;
-    return `<div class="material-row" data-slug="${m.slug||''}" data-share="${m.shareableLink||''}" style="animation-delay:${i*0.05}s"><div class="material-info"><h3>${esc(m.title)}</h3><div class="meta"><span>${esc(m.category?.name||'General')}</span>${m.subject?`<span>${esc(m.subject)}</span>`:''}${m.grade?`<span>Grade ${esc(m.grade)}</span>`:''}</div></div><span class="material-type-badge badge-${m.type||'note'}">${m.type||'note'}</span><span class="material-date">${new Date(m.createdAt).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span><div style="display:flex;gap:6px">${hasFile?`<button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName||'download')}" title="Download"><i class="fas fa-download"></i></button>`:''}<button class="btn btn-outline btn-sm share-btn" data-share="${m.shareableLink||m.slug}" title="Copy share link"><i class="fas fa-share-alt"></i></button></div></div>`;
+    const isLink = m.type === 'link' || m.storage === 'external-link';
+    const hasFile = m.fileUrl || m.fileId;
+    const typeLabel = m.type || 'note';
+    const path = m.customPath ? `/${m.customPath}` : `/materials?open=${m.slug}`;
+    const action = isLink
+        ? (m.fileUrl ? `<a class="btn btn-outline btn-sm open-btn" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer" title="Open link"><i class="fas fa-external-link-alt"></i></a>` : '')
+        : (hasFile ? `<button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}" title="Download"><i class="fas fa-download"></i></button>` : '');
+    return `<div class="material-row" data-slug="${m.slug || ''}" data-path="${esc(m.customPath || '')}" data-share="${m.customPath || m.shareableLink || m.slug}" data-title="${esc(m.title)}" style="animation-delay:${i * 0.05}s"><div class="material-info"><h3>${esc(m.title)}</h3><div class="meta"><span>${esc(m.category?.name || 'General')}</span>${m.subject ? `<span>${esc(m.subject)}</span>` : ''}${m.grade ? `<span>Grade ${esc(m.grade)}</span>` : ''}${m.customPath ? `<span style="font-family:var(--font-mono);color:var(--accent)">${path}</span>` : ''}</div></div><span class="material-type-badge badge-${typeLabel}">${typeLabel}</span><span class="material-date">${new Date(m.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span><div style="display:flex;gap:6px">${action}<button class="btn btn-outline btn-sm share-btn" data-share="${m.customPath || m.shareableLink || m.slug}" data-title="${esc(m.title)}" title="Share"><i class="fas fa-share-alt"></i></button></div></div>`;
 }
 
 function attachMaterialEvents() {
-    document.querySelectorAll('#materialsList .material-row, #lm .material-row').forEach(row => { row.addEventListener('click', function(e) { if (e.target.closest('button')) return; const slug = this.dataset.slug; if (slug && slug !== 'undefined' && slug !== 'null') openMaterialModal(slug); }); });
+    document.querySelectorAll('#materialsList .material-row, #lm .material-row').forEach(row => { row.addEventListener('click', function(e) { if (e.target.closest('button') || e.target.closest('a')) return; const slug = this.dataset.slug; if (slug && slug !== 'undefined' && slug !== 'null') openMaterialModal(slug); }); });
     document.querySelectorAll('.dl-btn').forEach(b => b.addEventListener('click', function(e) { e.stopPropagation(); downloadMaterial(this.dataset.id, this.dataset.filename); }));
-    document.querySelectorAll('.share-btn').forEach(b => b.addEventListener('click', function(e) { e.stopPropagation(); const shareUrl = `${window.location.origin}/s/${this.dataset.share}`; navigator.clipboard.writeText(shareUrl).then(() => { showToast('Share link copied! 📋', 'success'); }).catch(() => { showToast('Failed to copy link', 'error'); }); }));
+    document.querySelectorAll('.open-btn').forEach(b => b.addEventListener('click', function(e) { e.stopPropagation(); showDownloadToast('Opening link…'); }));
+    document.querySelectorAll('.share-btn').forEach(b => b.addEventListener('click', function(e) { e.stopPropagation(); const sharePath = this.dataset.share; const title = this.dataset.title || 'Study material'; showShareSheet(sharePath, title); }));
 }
 
 function initMaterialFilters() {
-    document.querySelectorAll('.material-filter-category').forEach(b => b.addEventListener('click', function() { document.querySelectorAll('.material-filter-category').forEach(x => x.classList.remove('active')); this.classList.add('active'); currentCategory = this.dataset.category; currentPage = 1; loadMaterials(); }));
+    document.querySelectorAll('.material-filter-category').forEach(b => b.addEventListener('click', function() { document.querySelectorAll('.material-filter-category').forEach(x => x.classList.remove('active')); this.classList.add('active'); currentCategory = this.dataset.slug || this.dataset.category; currentPage = 1; loadMaterials(); }));
     document.querySelectorAll('.material-filter-exam').forEach(b => b.addEventListener('click', function() { document.querySelectorAll('.material-filter-exam').forEach(x => x.classList.remove('active')); this.classList.add('active'); currentExamType = this.dataset.examtype; currentPage = 1; loadMaterials(); }));
 }
 
@@ -208,26 +224,41 @@ async function loadLatestMaterials() {
 async function openMaterialModal(slug) {
     if (!slug || slug === 'undefined' || slug === 'null') return;
     try {
-        const m = await (await fetch(`/api/materials/${slug}`)).json(); if (m.error) return showToast('Not found', 'error');
+        const m = await (await fetch(`/api/materials/${encodeURIComponent(slug)}`)).json(); if (m.error) return showToast('Not found', 'error');
+        const isLink = m.type === 'link' || m.storage === 'external-link';
         const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
-        overlay.innerHTML = `<div class="modal"><button class="modal-close">&times;</button><span class="material-type-badge badge-${m.type||'note'}" style="margin-bottom:16px;display:inline-block">${m.type||'note'}</span><h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:12px">${esc(m.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(m.description)}</p><div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--text-secondary)">${m.category?`<span><strong>Category:</strong> ${esc(m.category.name)}</span>`:''}${m.subject?`<span><strong>Subject:</strong> ${esc(m.subject)}</span>`:''}${m.grade?`<span><strong>Grade:</strong> ${esc(m.grade)}</span>`:''}</div><div style="display:flex;gap:12px;margin-bottom:16px;font-size:11px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${m.views||0}</span><span><i class="fas fa-download"></i> ${m.downloads||0}</span><span>${new Date(m.createdAt).toLocaleDateString()}</span></div><div style="display:flex;gap:10px">${(m.fileUrl||m.fileId)?`<button class="btn btn-primary md-btn" data-id="${m._id}" data-filename="${esc(m.fileName||'download')}"><i class="fas fa-download"></i> Download</button>`:''}<button class="btn btn-outline modal-share-btn" data-share="${m.shareableLink||m.slug}"><i class="fas fa-share-alt"></i> Share</button><button class="btn btn-outline mc-btn">Close</button></div></div>`;
+        const sharePath = m.customPath || m.shareableLink || m.slug;
+        const action = isLink
+            ? (m.fileUrl ? `<a class="btn btn-primary" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer"><i class="fas fa-external-link-alt"></i> Open Link</a>` : '')
+            : ((m.fileUrl || m.fileId) ? `<button class="btn btn-primary md-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}"><i class="fas fa-download"></i> Download</button>` : '');
+        overlay.innerHTML = `<div class="modal"><button class="modal-close">&times;</button><span class="material-type-badge badge-${m.type || 'note'}" style="margin-bottom:16px;display:inline-block">${m.type || 'note'}</span><h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:12px">${esc(m.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(m.description)}</p><div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--text-secondary)">${m.category ? `<span><strong>Category:</strong> ${esc(m.category.name)}</span>` : ''}${m.subject ? `<span><strong>Subject:</strong> ${esc(m.subject)}</span>` : ''}${m.grade ? `<span><strong>Grade:</strong> ${esc(m.grade)}</span>` : ''}</div>${m.customPath ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-bottom:14px">Path: <strong>/${esc(m.customPath)}</strong></div>` : ''}<div style="display:flex;gap:12px;margin-bottom:16px;font-size:11px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${m.views || 0}</span><span><i class="fas fa-download"></i> ${m.downloads || 0}</span><span>${new Date(m.createdAt).toLocaleDateString()}</span></div><div style="display:flex;gap:10px;flex-wrap:wrap">${action}<button class="btn btn-outline modal-share-btn" data-share="${esc(sharePath)}" data-title="${esc(m.title)}"><i class="fas fa-share-alt"></i> Share</button><button class="btn btn-outline mc-btn">Close</button></div></div>`;
         document.body.appendChild(overlay); document.body.style.overflow = 'hidden';
         const close = () => { overlay.remove(); document.body.style.overflow = ''; };
         overlay.querySelector('.modal-close').addEventListener('click', close); overlay.querySelector('.mc-btn').addEventListener('click', close);
         overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-        document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+        document.addEventListener('keydown', function esc2(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); } });
         const db = overlay.querySelector('.md-btn'); if (db) db.addEventListener('click', () => downloadMaterial(db.dataset.id, db.dataset.filename));
-        const sb = overlay.querySelector('.modal-share-btn'); if (sb) sb.addEventListener('click', function() { const shareUrl = `${window.location.origin}/s/${this.dataset.share}`; navigator.clipboard.writeText(shareUrl).then(() => { showToast('Share link copied! 📋', 'success'); }).catch(() => { showToast('Failed to copy', 'error'); }); });
+        const ob = overlay.querySelector('a[href]'); if (ob) ob.addEventListener('click', () => showDownloadToast('Opening link…'));
+        const sb = overlay.querySelector('.modal-share-btn'); if (sb) sb.addEventListener('click', function() { showShareSheet(this.dataset.share, this.dataset.title); });
     } catch (e) { showToast('Failed to load', 'error'); }
 }
 
-function downloadMaterial(id, filename) { const a = document.createElement('a'); a.href = `/api/materials/id/${id}/download`; a.download = filename || 'download'; a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a); showToast('Download started!', 'success'); }
+function downloadMaterial(id, filename) {
+    showDownloadToast('Your download will start shortly…');
+    const a = document.createElement('a');
+    a.href = `/api/materials/id/${id}/download`;
+    a.download = filename || 'download';
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
 
 function renderPagination(cid, page, pages) {
     const c = document.getElementById(cid); if (!c || pages <= 1) { if (c) c.innerHTML = ''; return; }
-    let h = `<button class="page-btn" data-page="${page-1}" ${page===1?'disabled':''}><i class="fas fa-chevron-left"></i></button>`;
-    for (let i = 1; i <= pages; i++) { if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) h += `<button class="page-btn ${i===page?'active':''}" data-page="${i}">${i}</button>`; else if (i === page - 3 || i === page + 3) h += '<span class="page-btn" style="border:none;cursor:default;color:var(--text-dim)">...</span>'; }
-    h += `<button class="page-btn" data-page="${page+1}" ${page===pages?'disabled':''}><i class="fas fa-chevron-right"></i></button>`; c.innerHTML = h;
+    let h = `<button class="page-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>`;
+    for (let i = 1; i <= pages; i++) { if (i === 1 || i === pages || (i >= page - 2 && i <= page + 2)) h += `<button class="page-btn ${i === page ? 'active' : ''}" data-page="${i}">${i}</button>`; else if (i === page - 3 || i === page + 3) h += '<span class="page-btn" style="border:none;cursor:default;color:var(--text-dim)">...</span>'; }
+    h += `<button class="page-btn" data-page="${page + 1}" ${page === pages ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>`; c.innerHTML = h;
     c.querySelectorAll('.page-btn:not([disabled])').forEach(b => b.addEventListener('click', function() { const np = parseInt(this.dataset.page); if (np !== currentPage && np >= 1 && np <= pages) { currentPage = np; if (document.getElementById('projectsGrid')) loadProjects(); if (document.getElementById('materialsList')) loadMaterials(); window.scrollTo({ top: 400, behavior: 'smooth' }); } }));
 }
 
@@ -239,14 +270,9 @@ async function initContactForm() {
         try {
             const r = await fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: document.getElementById('contactName').value, email: document.getElementById('contactEmail').value, subject: document.getElementById('contactSubject').value, message: document.getElementById('contactMessage').value }) });
             const data = await r.json().catch(() => ({}));
-            if (r.ok) {
-                showToast('Message sent!', 'success');
-                f.reset();
-            } else if (r.status === 429) {
-                showToast(data.error || "You've reached your daily message limit. Try again tomorrow.", 'error');
-            } else {
-                showToast(data.error || 'Failed to send message', 'error');
-            }
+            if (r.ok) { showToast('Message sent!', 'success'); f.reset(); }
+            else if (r.status === 429) { showToast(data.error || "You've reached your daily message limit. Try again tomorrow.", 'error'); }
+            else { showToast(data.error || 'Failed to send message', 'error'); }
         } catch (er) { showToast('Network error', 'error'); }
         btn.innerHTML = ot; btn.disabled = false;
     });
@@ -264,6 +290,71 @@ function initAIChat() {
 function initScrollAnimations() { if (!window.gsap || !window.ScrollTrigger) return; gsap.registerPlugin(ScrollTrigger); gsap.utils.toArray('.category-card, .project-card, .material-row, .stat-item, .section-header').forEach((el, i) => { gsap.from(el, { scrollTrigger: { trigger: el, start: 'top 90%' }, opacity: 0, y: 40, duration: 0.8, delay: i * 0.05, ease: 'power3.out' }); }); }
 
 function initSmoothScroll() { document.querySelectorAll('a[href^="#"]').forEach(a => a.addEventListener('click', function(e) { const t = document.querySelector(this.getAttribute('href')); if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth' }); } })); }
+
+function initDownloadToast() {
+    document.addEventListener('click', function(e) {
+        const a = e.target.closest('a[href*="/download"]');
+        if (a) showDownloadToast('Your download will start shortly…');
+    }, true);
+}
+
+function showDownloadToast(msg) {
+    let t = document.getElementById('dl-toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'dl-toast';
+        t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#141317;color:#e8e4dd;border:1px solid rgba(201,166,104,0.4);padding:12px 20px;border-radius:12px;font-size:13px;z-index:100000;opacity:0;transition:all .3s;box-shadow:0 10px 30px rgba(0,0,0,0.5);font-family:Inter,sans-serif;pointer-events:none';
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateX(-50%) translateY(0)'; });
+    clearTimeout(t._h);
+    t._h = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(20px)'; }, 3000);
+}
+
+function showShareSheet(sharePath, title) {
+    const fullUrl = `${window.location.origin}${sharePath.startsWith('/') ? sharePath : '/' + sharePath}`;
+    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        navigator.share({ title: title || 'Study material', text: title || 'Check this out on CODE & CLASSROOM', url: fullUrl })
+            .then(() => showDownloadToast('Shared!'))
+            .catch(() => {});
+        return;
+    }
+    const existing = document.getElementById('share-sheet');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'share-sheet';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);z-index:100001;display:flex;align-items:flex-end;justify-content:center;padding:0;animation:fadeIn .25s ease';
+    const enc = encodeURIComponent(fullUrl);
+    const encText = encodeURIComponent((title || 'Study material') + ' — CODE & CLASSROOM');
+    const apps = [
+        { name: 'WhatsApp', icon: 'fab fa-whatsapp', color: '#25D366', url: `https://wa.me/?text=${encText}%20${enc}` },
+        { name: 'Telegram', icon: 'fab fa-telegram', color: '#229ED9', url: `https://t.me/share/url?url=${enc}&text=${encText}` },
+        { name: 'X / Twitter', icon: 'fab fa-twitter', color: '#e8e4dd', url: `https://twitter.com/intent/tweet?url=${enc}&text=${encText}` },
+        { name: 'Facebook', icon: 'fab fa-facebook', color: '#1877F2', url: `https://www.facebook.com/sharer/sharer.php?u=${enc}` },
+        { name: 'Reddit', icon: 'fab fa-reddit', color: '#FF4500', url: `https://www.reddit.com/submit?url=${enc}&title=${encText}` },
+        { name: 'LinkedIn', icon: 'fab fa-linkedin', color: '#0A66C2', url: `https://www.linkedin.com/sharing/share-offsite/?url=${enc}` },
+        { name: 'Email', icon: 'fas fa-envelope', color: '#c9a668', url: `mailto:?subject=${encText}&body=${enc}` }
+    ];
+    const grid = apps.map(a => `<a href="${a.url}" target="_blank" rel="noopener noreferrer" style="display:flex;flex-direction:column;align-items:center;gap:8px;text-decoration:none;color:var(--text);padding:12px 8px;border-radius:12px;transition:background .2s" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'"><div style="width:52px;height:52px;border-radius:50%;background:${a.color}22;border:1px solid ${a.color}55;display:flex;align-items:center;justify-content:center;font-size:22px;color:${a.color}"><i class="${a.icon}"></i></div><span style="font-size:11px;color:var(--text-secondary);text-align:center">${a.name}</span></a>`).join('');
+    overlay.innerHTML = `<div style="background:#141317;border:1px solid rgba(255,255,255,0.08);border-top-left-radius:20px;border-top-right-radius:20px;width:100%;max-width:520px;padding:20px 24px 28px;box-shadow:0 -20px 60px rgba(0,0,0,0.5);animation:slideUp .3s cubic-bezier(0.19,1,0.22,1)"><div style="width:40px;height:4px;background:rgba(255,255,255,0.15);border-radius:2px;margin:0 auto 16px"></div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h3 style="font-family:var(--font-display);font-size:16px;color:var(--text);margin:0">Share this material</h3><button id="share-close" style="background:none;border:none;color:#5c5954;font-size:22px;cursor:pointer;line-height:1">&times;</button></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px">${grid}</div><div style="display:flex;gap:8px;background:#0d0c0f;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:8px 8px 8px 14px"><input readonly value="${fullUrl.replace(/"/g, '&quot;')}" id="share-url-input" style="flex:1;background:transparent;border:none;color:#a8a39a;font-size:12px;outline:none;font-family:JetBrains Mono,monospace"><button id="share-copy" style="padding:8px 16px;background:#c9a668;color:#0d0c0f;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Copy</button></div></div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.querySelector('#share-close').addEventListener('click', close);
+    overlay.querySelector('#share-copy').addEventListener('click', () => {
+        const input = overlay.querySelector('#share-url-input');
+        input.select();
+        navigator.clipboard.writeText(fullUrl).then(() => {
+            showDownloadToast('Link copied to clipboard');
+            overlay.querySelector('#share-copy').textContent = 'Copied!';
+            setTimeout(close, 700);
+        }).catch(() => {
+            try { document.execCommand('copy'); showDownloadToast('Link copied to clipboard'); setTimeout(close, 700); } catch (e) { showDownloadToast('Failed to copy'); }
+        });
+    });
+    document.addEventListener('keydown', function esc3(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc3); } });
+}
 
 function showToast(msg, type = 'info') { const existing = document.querySelector('.toast'); if (existing) existing.remove(); const toast = document.createElement('div'); toast.className = `toast toast-${type}`; toast.textContent = msg; document.body.appendChild(toast); setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'all 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000); }
 
