@@ -1,1 +1,406 @@
-(function(){var A=window.location.origin,sec="dashboard",editId=null;async function checkAuth(){try{var r=await fetch(A+"/auth/status"),d=await r.json();if(!d.authenticated)return document.body.innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0c0f;color:#e8e4dd;font-family:Inter,sans-serif;text-align:center;padding:40px"><div><div style="font-family:Fraunces,serif;font-size:24px;margin-bottom:16px;color:#c9a668">C&C Admin</div><p style="color:#8a8780;margin-bottom:32px">Please sign in to continue.</p><a href="/auth/google" style="display:inline-flex;align-items:center;gap:10px;padding:14px 28px;background:#fff;color:#1a1a1a;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px"><svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>Sign in with Google</a></div></div>',!1;if(!d.verified)return window.location.href="/admin-verify",!1;return!0}catch(e){return document.body.innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0c0f;color:#e8e4dd;font-family:Inter,sans-serif"><p>Cannot connect to server.</p></div>',!1}}function switchSection(n){sec=n,document.querySelectorAll(".admin-nav button[data-section]").forEach(function(t){t.classList.remove("active")});var t=document.querySelector('.admin-nav button[data-section="'+n+'"]');t&&t.classList.add("active"),document.querySelectorAll(".admin-section").forEach(function(t){t.classList.remove("active")});var e=document.getElementById("sec-"+n);e&&e.classList.add("active"),"dashboard"===n?loadDashboard():"categories"===n?loadCategories():"projects"===n?loadProjects():"materials"===n?loadMaterials():"messages"===n?loadMessages():"downloads"===n&&loadDownloadLogs()}async function loadDashboard(){try{var t=await(await fetch(A+"/api/admin/stats")).json();document.getElementById("dashboardStats").innerHTML='<div class="stat-card"><div class="stat-value">'+(t.materials||0)+'</div><div class="stat-label">Materials</div></div><div class="stat-card"><div class="stat-value">'+(t.categories||0)+'</div><div class="stat-label">Categories</div></div><div class="stat-card"><div class="stat-value">'+(t.projects||0)+'</div><div class="stat-label">Projects</div></div><div class="stat-card"><div class="stat-value">'+(t.downloads||0)+'</div><div class="stat-label">Downloads</div></div><div class="stat-card"><div class="stat-value">'+(t.views||0)+'</div><div class="stat-label">Views</div></div><div class="stat-card"><div class="stat-value">'+(t.unreadMessages||0)+"</div><div class=\"stat-label\">Unread</div></div>",document.getElementById("recentMaterialsBody").innerHTML=(t.recentMaterials||[]).length?t.recentMaterials.map(function(t){return"<tr><td>"+esc(t.title)+"</td><td>"+esc(t.category?.name||"—")+'</td><td><span class="badge badge-gold">'+(t.type||"note")+"</span></td><td>"+new Date(t.createdAt).toLocaleDateString()+"</td></tr>"}).join(""):'<tr class="empty-row"><td colspan="4">No materials</td></tr>'}catch(t){toast("Failed to load dashboard","error")}}async function loadCategories(){try{var t=await(await fetch(A+"/api/categories?all=true")).json(),e=Array.isArray(t)?t:[];document.getElementById("categoriesBody").innerHTML=e.length?e.map(function(t){return"<tr><td>"+esc(t.name)+'</td><td style="font-family:var(--font-mono);font-size:10px">'+t.slug+"</td><td>"+t.order+'</td><td><button class="btn btn-sm" data-edit="'+t._id+'">Edit</button> <button class="btn btn-sm btn-danger" data-del="'+t._id+'">Del</button></td></tr>'}).join(""):'<tr class="empty-row"><td colspan="4">No categories</td></tr>',document.querySelectorAll("#categoriesBody [data-edit]").forEach(function(t){t.addEventListener("click",function(){return openModal("category",t.dataset.edit)})}),document.querySelectorAll("#categoriesBody [data-del]").forEach(function(t){t.addEventListener("click",function(){return deleteItem("categories",t.dataset.del)})})}catch(t){toast("Failed","error")}}async function loadProjects(){try{var t=await(await fetch(A+"/api/projects?limit=100")).json(),e=t.projects||[],n={"live":"badge-green","in-progress":"badge-yellow",completed:"badge-blue",planning:"badge-gold","on-hold":"badge-orange",disabled:"badge-red"};document.getElementById("projectsBody").innerHTML=e.length?e.map(function(t){return"<tr><td>"+esc(t.title)+'</td><td><span class="badge '+(n[t.status]||"badge-gold")+'">'+(t.status||"planning").replace("-"," ")+"</span></td><td>"+(t.progress||0)+"%</td><td>"+(t.views||0)+'</td><td><button class="btn btn-sm" data-edit="'+t._id+'">Edit</button> <button class="btn btn-sm btn-danger" data-del="'+t._id+'">Del</button></td></tr>'}).join(""):'<tr class="empty-row"><td colspan="5">No projects</td></tr>',document.querySelectorAll("#projectsBody [data-edit]").forEach(function(t){t.addEventListener("click",function(){return openModal("project",t.dataset.edit)})}),document.querySelectorAll("#projectsBody [data-del]").forEach(function(t){t.addEventListener("click",function(){return deleteItem("projects",t.dataset.del)})})}catch(t){toast("Failed","error")}}async function loadMaterials(){try{var t=await(await fetch(A+"/api/materials?limit=100")).json(),e=t.materials||[];document.getElementById("materialsBody").innerHTML=e.length?e.map(function(t){return"<tr><td>"+esc(t.title)+"</td><td>"+esc(t.category?.name||"—")+'</td><td><span class="badge badge-gold">'+(t.type||"note")+"</span></td><td>"+(t.downloads||0)+'</td><td><button class="btn btn-sm" data-edit="'+t._id+'">Edit</button> <button class="btn btn-sm btn-danger" data-del="'+t._id+'">Del</button></td></tr>'}).join(""):'<tr class="empty-row"><td colspan="5">No materials</td></tr>',document.querySelectorAll("#materialsBody [data-edit]").forEach(function(t){t.addEventListener("click",function(){return openModal("material",t.dataset.edit)})}),document.querySelectorAll("#materialsBody [data-del]").forEach(function(t){t.addEventListener("click",function(){return deleteItem("materials",t.dataset.del)})})}catch(t){toast("Failed","error")}}async function loadMessages(){try{var t=await(await fetch(A+"/api/admin/messages")).json(),e=Array.isArray(t)?t:[],n=e.filter(function(t){return!t.isRead}).length,o=document.getElementById("messagesBadge"),a=document.getElementById("messagesNavBtn");o&&(n>0?(o.textContent=n,o.style.display="flex"):o.style.display="none"),document.getElementById("messagesBody").innerHTML=e.length?e.map(function(t){return'<tr class="'+(t.isRead?"":"unread-row")+'"><td><strong>'+esc(t.name)+'</strong><br><small style="color:var(--text-dim)">'+esc(t.email)+"</small></td><td>"+esc(t.subject||"—")+"</td><td>"+new Date(t.createdAt).toLocaleDateString()+'</td><td><span class="badge '+(t.isRead?"badge-green":"badge-yellow")+'">'+(t.isRead?"Read":"New")+'</span></td><td><button class="btn btn-sm" data-view="'+t._id+'">View</button></td></tr>'}).join(""):'<tr class="empty-row"><td colspan="5">No messages</td></tr>',document.querySelectorAll("#messagesBody [data-view]").forEach(function(t){t.addEventListener("click",function(){return viewMessage(t.dataset.view)})})}catch(t){toast("Failed","error")}}async function loadDownloadLogs(){try{var t=await(await fetch(A+"/api/admin/stats")).json(),e=t.recentDownloads||[];document.getElementById("downloadLogsBody").innerHTML=e.length?e.map(function(t){return"<tr><td>"+esc(t.material?.title||"Unknown")+'</td><td style="font-family:var(--font-mono);font-size:10px">'+(t.ip||"—")+'</td><td style="font-size:10px">'+new Date(t.timestamp).toLocaleString()+"</td></tr>"}).join(""):'<tr class="empty-row"><td colspan="3">No downloads</td></tr>'}catch(t){}}function openModal(t,n){editId=n||null;var e=document.getElementById("modalContent"),o="";"category"===t?o="<h3>"+(n?"Edit":"Add")+' Category</h3><form id="mf"><div class="form-group"><label>Name</label><input id="fName" required></div><div class="form-group"><label>Description</label><textarea id="fDesc" rows="2"></textarea></div><div class="form-row"><div class="form-group"><label>Icon</label><input id="fIcon" value="folder"></div><div class="form-group"><label>Color</label><input id="fColor" value="#c9a668"></div></div><div class="form-group"><label>Order</label><input type="number" id="fOrder" value="0"></div><div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form>':"project"===t?o="<h3>"+(n?"Edit":"Add")+' Project</h3><form id="mf" enctype="multipart/form-data"><div class="form-group"><label>Title</label><input id="fTitle" name="title" required></div><div class="form-group"><label>Description</label><textarea id="fDesc" name="description" rows="3" required></textarea></div><div class="form-group"><label>Category (optional)</label><select id="fCat" name="category"><option value="">None</option></select></div><div class="form-row"><div class="form-group"><label>Status</label><select id="fStatus" name="status"><option value="planning">Planning</option><option value="in-progress">In Progress</option><option value="completed">Completed</option><option value="live">Live</option><option value="on-hold">On Hold</option><option value="disabled">Disabled</option></select></div><div class="form-group"><label>Progress %</label><input type="number" id="fProgress" name="progress" value="0" min="0" max="100"></div></div><div class="form-group"><label>Tech Stack (comma separated)</label><input id="fTechStack" name="techStack" placeholder="HTML, CSS, JavaScript"></div><div class="form-row"><div class="form-group"><label>Live URL</label><input type="url" id="fLiveUrl" name="liveUrl" placeholder="https://"></div><div class="form-group"><label>GitHub URL</label><input type="url" id="fGithubUrl" name="githubUrl" placeholder="https://"></div></div><div class="form-group"><label>Thumbnail Image</label><input type="file" id="fThumbnail" name="thumbnail" accept="image/*"></div><div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form>':"material"===t&&(o="<h3>"+(n?"Edit":"Add")+' Material</h3><form id="mf" enctype="multipart/form-data"><div class="form-group"><label>Title</label><input id="fTitle" name="title" required></div><div class="form-group"><label>Description</label><textarea id="fDesc" name="description" rows="2" required></textarea></div><div class="form-group"><label>Category</label><select id="fCat" name="category" required></select></div><div class="form-row"><div class="form-group"><label>Exam Type</label><select id="fExamType" name="examType"><option value="notes">Notes</option><option value="test-paper">Test Paper</option><option value="exam-paper">Exam Paper</option><option value="practice">Practice</option><option value="resource">Resource</option></select></div><div class="form-group"><label>Subject</label><input id="fSubject" name="subject"></div></div><div class="form-group"><label>Grade</label><input id="fGrade" name="grade"></div><div class="form-group"><label>File Upload</label><input type="file" id="fFile" name="file"></div><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="fWatermark" name="addWatermark" value="true" checked style="width:auto"> Add C&C Watermark</label></div><div class="form-group"><label>Or External Link</label><input type="url" id="fExternalLink" name="externalLink" placeholder="https://..."></div><div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form>'),e.innerHTML=o,document.getElementById("modalOverlay").style.display="flex",document.getElementById("mc").addEventListener("click",closeModal),("project"===t||"material"===t)&&loadCatOpts(),n&&loadEditData(t,n),document.getElementById("mf").addEventListener("submit",async function(e){e.preventDefault(),await saveForm(t)})}function closeModal(){document.getElementById("modalOverlay").style.display="none",editId=null}async function loadCatOpts(){try{var t=await(await fetch(A+"/api/categories?all=true")).json(),e=Array.isArray(t)?t:[],n=e.map(function(t){return'<option value="'+t._id+'">'+t.name+"</option>"}).join(""),o=document.getElementById("fCat");o&&(o.innerHTML='<option value="">None</option>'+n)}catch(t){}}async function loadEditData(t,n){try{if("category"===t){var e=await(await fetch(A+"/api/categories?all=true")).json(),c=(Array.isArray(e)?e:[]).find(function(e){return e._id===n});c&&(document.getElementById("fName").value=c.name||"",document.getElementById("fDesc").value=c.description||"",document.getElementById("fIcon").value=c.icon||"folder",document.getElementById("fColor").value=c.color||"#c9a668",document.getElementById("fOrder").value=c.order||0)}else if("project"===t){var p=await(await fetch(A+"/api/projects?limit=100")).json(),r=(p.projects||[]).find(function(e){return e._id===n});r&&(document.getElementById("fTitle").value=r.title||"",document.getElementById("fDesc").value=r.description||"",r.category&&(document.getElementById("fCat").value=r.category._id||r.category||""),document.getElementById("fStatus").value=r.status||"planning",document.getElementById("fProgress").value=r.progress||0,document.getElementById("fTechStack").value=(r.techStack||[]).join(", "),document.getElementById("fLiveUrl").value=r.liveUrl||"",document.getElementById("fGithubUrl").value=r.githubUrl||"")}else if("material"===t){var m=await(await fetch(A+"/api/materials?limit=100")).json(),a=(m.materials||[]).find(function(e){return e._id===n});a&&(document.getElementById("fTitle").value=a.title||"",document.getElementById("fDesc").value=a.description||"",a.category&&(document.getElementById("fCat").value=a.category._id||a.category||""),document.getElementById("fExamType").value=a.examType||"notes",document.getElementById("fSubject").value=a.subject||"",document.getElementById("fGrade").value=a.grade||"",a.fileUrl&&"external-link"===a.storage&&(document.getElementById("fExternalLink").value=a.fileUrl))}}catch(t){}}async function saveForm(t){var e={category:"/api/admin/categories",project:"/api/admin/projects",material:"/api/admin/materials"},n=A+e[t];editId&&(n+="/"+editId);var o=editId?"PUT":"POST";try{if("category"===t){var a={name:document.getElementById("fName")?.value?.trim()||"",description:document.getElementById("fDesc")?.value?.trim()||"",icon:document.getElementById("fIcon")?.value?.trim()||"folder",color:document.getElementById("fColor")?.value?.trim()||"#c9a668",order:parseInt(document.getElementById("fOrder")?.value)||0};if(!a.name)return void toast("Name is required","error");var i=await fetch(n,{method:o,headers:{"Content-Type":"application/json"},body:JSON.stringify(a)});if(i.ok)closeModal(),loadCategories(),loadDashboard(),toast("Category saved!","success");else{var s=await i.json();toast(s.error||"Failed","error")}}else if("project"===t){var c=new FormData,d=document.getElementById("fTitle")?.value?.trim(),l=document.getElementById("fDesc")?.value?.trim();if(!d)return void toast("Title is required","error");if(!l)return void toast("Description is required","error");c.append("title",d),c.append("description",l);var r=document.getElementById("fCat")?.value;r&&c.append("category",r),c.append("status",document.getElementById("fStatus")?.value||"planning"),c.append("progress",document.getElementById("fProgress")?.value||"0");var u=document.getElementById("fTechStack")?.value?.trim();u&&c.append("techStack",u);var p=document.getElementById("fLiveUrl")?.value?.trim();p&&c.append("liveUrl",p);var v=document.getElementById("fGithubUrl")?.value?.trim();v&&c.append("githubUrl",v);var m=document.getElementById("fThumbnail")?.files?.[0];m&&c.append("thumbnail",m);var h=await fetch(n,{method:o,body:c});if(h.ok)closeModal(),loadProjects(),loadDashboard(),toast("Project saved!","success");else{var g=await h.json();toast(g.error||"Failed","error")}}else if("material"===t){var f=new FormData,y=document.getElementById("fTitle")?.value?.trim(),b=document.getElementById("fDesc")?.value?.trim(),w=document.getElementById("fCat")?.value;if(!y)return void toast("Title is required","error");if(!b)return void toast("Description is required","error");if(!w)return void toast("Category is required","error");f.append("title",y),f.append("description",b),f.append("category",w),f.append("examType",document.getElementById("fExamType")?.value||"notes");var k=document.getElementById("fSubject")?.value?.trim();k&&f.append("subject",k);var S=document.getElementById("fGrade")?.value?.trim();S&&f.append("grade",S);var x=document.getElementById("fFile")?.files?.[0];x&&f.append("file",x);var C=document.getElementById("fWatermark")?.checked;f.append("addWatermark",C||false);var L=document.getElementById("fExternalLink")?.value?.trim();L&&f.append("externalLink",L);var E=await fetch(n,{method:o,body:f});if(E.ok)closeModal(),loadMaterials(),loadDashboard(),toast("Material saved!","success");else{var T=await E.json();toast(T.error||"Failed","error")}}}catch(t){toast("Network error: "+t.message,"error")}}async function deleteItem(t,e){if(!confirm("Delete permanently? This cannot be undone."))return;var n={categories:"/api/admin/categories",projects:"/api/admin/projects",materials:"/api/admin/materials"};try{var o=await fetch(A+n[t]+"/"+e,{method:"DELETE"});if(o.ok)"categories"===t?loadCategories():"projects"===t?(loadProjects(),loadDashboard()):(loadMaterials(),loadDashboard()),toast("Deleted","success");else{var a=await o.json();toast(a.error||"Failed","error")}}catch(t){toast("Network error","error")}}async function viewMessage(t){try{await fetch(A+"/api/admin/messages/"+t+"/read",{method:"PUT"});var e=await(await fetch(A+"/api/admin/messages")).json(),n=(Array.isArray(e)?e:[]).find(function(e){return e._id===t});n&&(document.getElementById("modalContent").innerHTML="<h3>Message from "+esc(n.name)+'</h3><p style="color:var(--text-dim);font-size:11px;margin-bottom:14px">'+esc(n.email)+" · "+new Date(n.createdAt).toLocaleString()+'</p><p style="margin-bottom:6px"><strong>Subject:</strong> '+esc(n.subject||"N/A")+'</p><div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px;line-height:1.7;color:var(--text-secondary);font-size:13px">'+esc(n.message)+'</div><div class="form-actions"><button type="button" class="btn" id="mc">Close</button></div>',document.getElementById("modalOverlay").style.display="flex",document.getElementById("mc").addEventListener("click",closeModal),loadMessages())}catch(t){}}function toast(t,e){var n=document.querySelector(".toast");n&&n.remove();var o=document.createElement("div");o.className="toast toast-"+e,o.textContent=t,document.body.appendChild(o),setTimeout(function(){o.style.opacity="0",o.style.transition="opacity 0.3s",setTimeout(function(){o.remove()},300)},2500)}function esc(t){if(!t)return"";var e=document.createElement("div");return e.textContent=t,e.innerHTML}document.getElementById("modalOverlay").addEventListener("click",function(t){t.target===this&&closeModal()}),document.addEventListener("keydown",function(t){"Escape"===t.key&&closeModal()}),document.querySelectorAll(".admin-nav button[data-section]").forEach(function(t){t.addEventListener("click",function(){switchSection(this.dataset.section)})}),document.getElementById("logoutBtn").addEventListener("click",function(){window.location.href="/auth/logout"}),document.getElementById("addCategoryBtn").addEventListener("click",function(){openModal("category")}),document.getElementById("addProjectBtn").addEventListener("click",function(){openModal("project")}),document.getElementById("addMaterialBtn").addEventListener("click",function(){openModal("material")}),async function(){await checkAuth()&&(loadDashboard(),loadCategories(),loadMessages())}()})();
+(function () {
+    var A = window.location.origin, sec = 'dashboard', editId = null;
+
+    async function checkAuth() {
+        try {
+            var r = await fetch(A + '/auth/status');
+            var d = await r.json();
+            if (!d.authenticated) {
+                document.body.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0c0f;color:#e8e4dd;font-family:Inter,sans-serif;text-align:center;padding:40px"><div><div style="font-family:Fraunces,serif;font-size:24px;margin-bottom:16px;color:#c9a668">C&amp;C Admin</div><p style="color:#8a8780;margin-bottom:32px">Please sign in to continue.</p><a href="/auth/google" style="display:inline-flex;align-items:center;gap:10px;padding:14px 28px;background:#fff;color:#1a1a1a;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Sign in with Google</a></div></div>';
+                return false;
+            }
+            if (!d.verified) {
+                window.location.href = '/admin-verify';
+                return false;
+            }
+            return true;
+        } catch (e) {
+            document.body.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d0c0f;color:#e8e4dd;font-family:Inter,sans-serif"><p>Cannot connect to server.</p></div>';
+            return false;
+        }
+    }
+
+    function switchSection(n) {
+        sec = n;
+        document.querySelectorAll('.admin-nav button[data-section]').forEach(function (t) { t.classList.remove('active'); });
+        var btn = document.querySelector('.admin-nav button[data-section="' + n + '"]');
+        if (btn) btn.classList.add('active');
+        document.querySelectorAll('.admin-section').forEach(function (t) { t.classList.remove('active'); });
+        var el = document.getElementById('sec-' + n);
+        if (el) el.classList.add('active');
+        if (n === 'dashboard') loadDashboard();
+        else if (n === 'categories') loadCategories();
+        else if (n === 'projects') loadProjects();
+        else if (n === 'materials') loadMaterials();
+        else if (n === 'messages') loadMessages();
+        else if (n === 'downloads') loadDownloadLogs();
+    }
+
+    async function loadDashboard() {
+        try {
+            var t = await (await fetch(A + '/api/admin/stats')).json();
+            document.getElementById('dashboardStats').innerHTML =
+                '<div class="stat-card"><div class="stat-value">' + (t.materials || 0) + '</div><div class="stat-label">Materials</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + (t.categories || 0) + '</div><div class="stat-label">Categories</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + (t.projects || 0) + '</div><div class="stat-label">Projects</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + (t.downloads || 0) + '</div><div class="stat-label">Downloads</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + (t.views || 0) + '</div><div class="stat-label">Views</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + (t.unreadMessages || 0) + '</div><div class="stat-label">Unread</div></div>';
+            var rm = t.recentMaterials || [];
+            document.getElementById('recentMaterialsBody').innerHTML = rm.length
+                ? rm.map(function (m) {
+                    return '<tr><td>' + esc(m.title) + '</td><td>' + esc(m.category && m.category.name ? m.category.name : '—') + '</td><td><span class="badge badge-gold">' + (m.type || 'note') + '</span></td><td>' + new Date(m.createdAt).toLocaleDateString() + '</td></tr>';
+                }).join('')
+                : '<tr class="empty-row"><td colspan="4">No materials</td></tr>';
+        } catch (e) { toast('Failed to load dashboard', 'error'); }
+    }
+
+    async function loadCategories() {
+        try {
+            var t = await (await fetch(A + '/api/categories?all=true')).json();
+            var list = Array.isArray(t) ? t : [];
+            document.getElementById('categoriesBody').innerHTML = list.length
+                ? list.map(function (c) {
+                    return '<tr><td>' + esc(c.name) + '</td><td style="font-family:var(--font-mono);font-size:10px">' + c.slug + '</td><td>' + c.order + '</td><td><button class="btn btn-sm" data-edit="' + c._id + '">Edit</button> <button class="btn btn-sm btn-danger" data-del="' + c._id + '">Del</button></td></tr>';
+                }).join('')
+                : '<tr class="empty-row"><td colspan="4">No categories</td></tr>';
+            document.querySelectorAll('#categoriesBody [data-edit]').forEach(function (b) { b.addEventListener('click', function () { openModal('category', b.dataset.edit); }); });
+            document.querySelectorAll('#categoriesBody [data-del]').forEach(function (b) { b.addEventListener('click', function () { deleteItem('categories', b.dataset.del); }); });
+        } catch (e) { toast('Failed', 'error'); }
+    }
+
+    async function loadProjects() {
+        try {
+            var t = await (await fetch(A + '/api/projects?limit=100')).json();
+            var list = t.projects || [];
+            var badges = { 'live': 'badge-green', 'in-progress': 'badge-yellow', 'completed': 'badge-blue', 'planning': 'badge-gold', 'on-hold': 'badge-orange', 'disabled': 'badge-red' };
+            document.getElementById('projectsBody').innerHTML = list.length
+                ? list.map(function (p) {
+                    return '<tr><td>' + esc(p.title) + '</td><td><span class="badge ' + (badges[p.status] || 'badge-gold') + '">' + (p.status || 'planning').replace('-', ' ') + '</span></td><td>' + (p.progress || 0) + '%</td><td>' + (p.views || 0) + '</td><td><button class="btn btn-sm" data-edit="' + p._id + '">Edit</button> <button class="btn btn-sm btn-danger" data-del="' + p._id + '">Del</button></td></tr>';
+                }).join('')
+                : '<tr class="empty-row"><td colspan="5">No projects</td></tr>';
+            document.querySelectorAll('#projectsBody [data-edit]').forEach(function (b) { b.addEventListener('click', function () { openModal('project', b.dataset.edit); }); });
+            document.querySelectorAll('#projectsBody [data-del]').forEach(function (b) { b.addEventListener('click', function () { deleteItem('projects', b.dataset.del); }); });
+        } catch (e) { toast('Failed', 'error'); }
+    }
+
+    async function loadMaterials() {
+        try {
+            var t = await (await fetch(A + '/api/materials?limit=100')).json();
+            var list = t.materials || [];
+            document.getElementById('materialsBody').innerHTML = list.length
+                ? list.map(function (m) {
+                    return '<tr><td>' + esc(m.title) + '<div style="font-family:var(--font-mono);font-size:10px;color:var(--accent);margin-top:2px">/' + (m.customPath || '—') + '</div></td><td>' + esc(m.category && m.category.name ? m.category.name : '—') + '</td><td><span class="badge badge-gold">' + (m.type || 'note') + '</span></td><td>' + (m.downloads || 0) + '</td><td><button class="btn btn-sm" data-edit="' + m._id + '">Edit</button> <button class="btn btn-sm btn-danger" data-del="' + m._id + '">Del</button></td></tr>';
+                }).join('')
+                : '<tr class="empty-row"><td colspan="5">No materials</td></tr>';
+            document.querySelectorAll('#materialsBody [data-edit]').forEach(function (b) { b.addEventListener('click', function () { openModal('material', b.dataset.edit); }); });
+            document.querySelectorAll('#materialsBody [data-del]').forEach(function (b) { b.addEventListener('click', function () { deleteItem('materials', b.dataset.del); }); });
+        } catch (e) { toast('Failed', 'error'); }
+    }
+
+    async function loadMessages() {
+        try {
+            var t = await (await fetch(A + '/api/admin/messages')).json();
+            var list = Array.isArray(t) ? t : [];
+            var unread = list.filter(function (m) { return !m.isRead; }).length;
+            var badge = document.getElementById('messagesBadge');
+            if (badge) {
+                if (unread > 0) { badge.textContent = unread; badge.style.display = 'flex'; } else badge.style.display = 'none';
+            }
+            document.getElementById('messagesBody').innerHTML = list.length
+                ? list.map(function (m) {
+                    return '<tr class="' + (m.isRead ? '' : 'unread-row') + '"><td><strong>' + esc(m.name) + '</strong><br><small style="color:var(--text-dim)">' + esc(m.email) + '</small></td><td>' + esc(m.subject || '—') + '</td><td>' + new Date(m.createdAt).toLocaleDateString() + '</td><td><span class="badge ' + (m.isRead ? 'badge-green' : 'badge-yellow') + '">' + (m.isRead ? 'Read' : 'New') + '</span></td><td><button class="btn btn-sm" data-view="' + m._id + '">View</button></td></tr>';
+                }).join('')
+                : '<tr class="empty-row"><td colspan="5">No messages</td></tr>';
+            document.querySelectorAll('#messagesBody [data-view]').forEach(function (b) { b.addEventListener('click', function () { viewMessage(b.dataset.view); }); });
+        } catch (e) { toast('Failed', 'error'); }
+    }
+
+    async function loadDownloadLogs() {
+        try {
+            var t = await (await fetch(A + '/api/admin/stats')).json();
+            var list = t.recentDownloads || [];
+            document.getElementById('downloadLogsBody').innerHTML = list.length
+                ? list.map(function (d) {
+                    return '<tr><td>' + esc(d.material && d.material.title ? d.material.title : 'Unknown') + '</td><td style="font-family:var(--font-mono);font-size:10px">' + (d.ip || '—') + '</td><td style="font-size:10px">' + new Date(d.timestamp).toLocaleString() + '</td></tr>';
+                }).join('')
+                : '<tr class="empty-row"><td colspan="3">No downloads</td></tr>';
+        } catch (e) {}
+    }
+
+    function openModal(type, id) {
+        editId = id || null;
+        var content = document.getElementById('modalContent');
+        var html = '';
+
+        if (type === 'category') {
+            html = '<h3>' + (id ? 'Edit' : 'Add') + ' Category</h3>' +
+                '<form id="mf">' +
+                '<div class="form-group"><label>Name</label><input id="fName" required></div>' +
+                '<div class="form-group"><label>Description</label><textarea id="fDesc" rows="2"></textarea></div>' +
+                '<div class="form-row"><div class="form-group"><label>Icon</label><input id="fIcon" value="folder"></div><div class="form-group"><label>Color</label><input id="fColor" value="#c9a668"></div></div>' +
+                '<div class="form-group"><label>Order</label><input type="number" id="fOrder" value="0"></div>' +
+                '<div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>' +
+                '</form>';
+        } else if (type === 'project') {
+            html = '<h3>' + (id ? 'Edit' : 'Add') + ' Project</h3>' +
+                '<form id="mf" enctype="multipart/form-data">' +
+                '<div class="form-group"><label>Title</label><input id="fTitle" name="title" required></div>' +
+                '<div class="form-group"><label>Description</label><textarea id="fDesc" name="description" rows="3" required></textarea></div>' +
+                '<div class="form-group"><label>Category (optional)</label><select id="fCat" name="category"><option value="">None</option></select></div>' +
+                '<div class="form-row">' +
+                '<div class="form-group"><label>Status</label><select id="fStatus" name="status"><option value="planning">Planning</option><option value="in-progress">In Progress</option><option value="completed">Completed</option><option value="live">Live</option><option value="on-hold">On Hold</option><option value="disabled">Disabled</option></select></div>' +
+                '<div class="form-group"><label>Progress %</label><input type="number" id="fProgress" name="progress" value="0" min="0" max="100"></div>' +
+                '</div>' +
+                '<div class="form-group"><label>Tech Stack (comma separated)</label><input id="fTechStack" name="techStack" placeholder="HTML, CSS, JavaScript"></div>' +
+                '<div class="form-row"><div class="form-group"><label>Live URL</label><input type="url" id="fLiveUrl" name="liveUrl" placeholder="https://"></div><div class="form-group"><label>GitHub URL</label><input type="url" id="fGithubUrl" name="githubUrl" placeholder="https://"></div></div>' +
+                '<div class="form-group"><label>Thumbnail Image</label><input type="file" id="fThumbnail" name="thumbnail" accept="image/*"></div>' +
+                '<div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>' +
+                '</form>';
+        } else if (type === 'material') {
+            html = '<h3>' + (id ? 'Edit' : 'Add') + ' Material</h3>' +
+                '<form id="mf" enctype="multipart/form-data">' +
+                '<div class="form-group"><label>Title</label><input id="fTitle" name="title" required></div>' +
+                '<div class="form-group"><label>Custom Link Path</label><input id="fCustomPath" name="customPath" placeholder="e.g. eng-last-letter"><small style="color:var(--text-dim);font-size:11px;display:block;margin-top:6px">Leave blank to auto-generate from title. Material will be available at /eng-last-letter</small></div>' +
+                '<div class="form-group"><label>Description</label><textarea id="fDesc" name="description" rows="2" required></textarea></div>' +
+                '<div class="form-group"><label>Category</label><select id="fCat" name="category" required></select></div>' +
+                '<div class="form-row"><div class="form-group"><label>Exam Type</label><select id="fExamType" name="examType"><option value="notes">Notes</option><option value="test-paper">Test Paper</option><option value="exam-paper">Exam Paper</option><option value="practice">Practice</option><option value="resource">Resource</option></select></div><div class="form-group"><label>Subject</label><input id="fSubject" name="subject"></div></div>' +
+                '<div class="form-group"><label>Grade</label><input id="fGrade" name="grade"></div>' +
+                '<div class="form-group"><label>File Upload</label><input type="file" id="fFile" name="file"></div>' +
+                '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="fWatermark" name="addWatermark" value="true" checked style="width:auto"> Add C&amp;C Watermark</label></div>' +
+                '<div class="form-group"><label>Or External Link</label><input type="url" id="fExternalLink" name="externalLink" placeholder="https://..."></div>' +
+                '<div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>' +
+                '</form>';
+        }
+
+        content.innerHTML = html;
+        document.getElementById('modalOverlay').style.display = 'flex';
+        document.getElementById('mc').addEventListener('click', closeModal);
+
+        if (type === 'project' || type === 'material') loadCatOpts();
+        if (id) loadEditData(type, id);
+
+        document.getElementById('mf').addEventListener('submit', function (e) {
+            e.preventDefault();
+            saveForm(type);
+        });
+
+        if (type === 'material' && !id) {
+            var ttl = document.getElementById('fTitle');
+            var cp = document.getElementById('fCustomPath');
+            var auto = true;
+            if (cp) cp.addEventListener('input', function () { auto = false; });
+            if (ttl) ttl.addEventListener('input', function () {
+                if (auto && cp) {
+                    cp.value = ttl.value.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '');
+                }
+            });
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('modalOverlay').style.display = 'none';
+        editId = null;
+    }
+
+    async function loadCatOpts() {
+        try {
+            var t = await (await fetch(A + '/api/categories?all=true')).json();
+            var list = Array.isArray(t) ? t : [];
+            var opts = list.map(function (c) { return '<option value="' + c._id + '">' + c.name + '</option>'; }).join('');
+            var sel = document.getElementById('fCat');
+            if (sel) sel.innerHTML = '<option value="">None</option>' + opts;
+        } catch (e) {}
+    }
+
+    async function loadEditData(type, id) {
+        try {
+            if (type === 'category') {
+                var all = await (await fetch(A + '/api/categories?all=true')).json();
+                var c = (Array.isArray(all) ? all : []).find(function (x) { return x._id === id; });
+                if (c) {
+                    document.getElementById('fName').value = c.name || '';
+                    document.getElementById('fDesc').value = c.description || '';
+                    document.getElementById('fIcon').value = c.icon || 'folder';
+                    document.getElementById('fColor').value = c.color || '#c9a668';
+                    document.getElementById('fOrder').value = c.order || 0;
+                }
+            } else if (type === 'project') {
+                var p = await (await fetch(A + '/api/projects?limit=100')).json();
+                var r = (p.projects || []).find(function (x) { return x._id === id; });
+                if (r) {
+                    document.getElementById('fTitle').value = r.title || '';
+                    document.getElementById('fDesc').value = r.description || '';
+                    if (r.category) document.getElementById('fCat').value = r.category._id || r.category || '';
+                    document.getElementById('fStatus').value = r.status || 'planning';
+                    document.getElementById('fProgress').value = r.progress || 0;
+                    document.getElementById('fTechStack').value = (r.techStack || []).join(', ');
+                    document.getElementById('fLiveUrl').value = r.liveUrl || '';
+                    document.getElementById('fGithubUrl').value = r.githubUrl || '';
+                }
+            } else if (type === 'material') {
+                var m = await (await fetch(A + '/api/materials?limit=100')).json();
+                var a = (m.materials || []).find(function (x) { return x._id === id; });
+                if (a) {
+                    document.getElementById('fTitle').value = a.title || '';
+                    document.getElementById('fDesc').value = a.description || '';
+                    document.getElementById('fCustomPath').value = a.customPath || '';
+                    if (a.category) document.getElementById('fCat').value = a.category._id || a.category || '';
+                    document.getElementById('fExamType').value = a.examType || 'notes';
+                    document.getElementById('fSubject').value = a.subject || '';
+                    document.getElementById('fGrade').value = a.grade || '';
+                    if (a.fileUrl && a.storage === 'external-link') document.getElementById('fExternalLink').value = a.fileUrl;
+                }
+            }
+        } catch (e) {}
+    }
+
+    async function saveForm(type) {
+        var paths = { category: '/api/admin/categories', project: '/api/admin/projects', material: '/api/admin/materials' };
+        var url = A + paths[type];
+        if (editId) url += '/' + editId;
+        var method = editId ? 'PUT' : 'POST';
+
+        try {
+            if (type === 'category') {
+                var payload = {
+                    name: (document.getElementById('fName') || {}).value ? document.getElementById('fName').value.trim() : '',
+                    description: (document.getElementById('fDesc') || {}).value ? document.getElementById('fDesc').value.trim() : '',
+                    icon: (document.getElementById('fIcon') || {}).value ? document.getElementById('fIcon').value.trim() : 'folder',
+                    color: (document.getElementById('fColor') || {}).value ? document.getElementById('fColor').value.trim() : '#c9a668',
+                    order: parseInt((document.getElementById('fOrder') || {}).value) || 0
+                };
+                if (!payload.name) { toast('Name is required', 'error'); return; }
+                var res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok) { closeModal(); loadCategories(); loadDashboard(); toast('Category saved!', 'success'); }
+                else { var err = await res.json(); toast(err.error || 'Failed', 'error'); }
+            } else if (type === 'project') {
+                var fd = new FormData();
+                var title = (document.getElementById('fTitle') || {}).value ? document.getElementById('fTitle').value.trim() : '';
+                var desc = (document.getElementById('fDesc') || {}).value ? document.getElementById('fDesc').value.trim() : '';
+                if (!title) { toast('Title is required', 'error'); return; }
+                if (!desc) { toast('Description is required', 'error'); return; }
+                fd.append('title', title);
+                fd.append('description', desc);
+                var cat = (document.getElementById('fCat') || {}).value;
+                if (cat) fd.append('category', cat);
+                fd.append('status', (document.getElementById('fStatus') || {}).value || 'planning');
+                fd.append('progress', (document.getElementById('fProgress') || {}).value || '0');
+                var tech = (document.getElementById('fTechStack') || {}).value ? document.getElementById('fTechStack').value.trim() : '';
+                if (tech) fd.append('techStack', tech);
+                var live = (document.getElementById('fLiveUrl') || {}).value ? document.getElementById('fLiveUrl').value.trim() : '';
+                if (live) fd.append('liveUrl', live);
+                var gh = (document.getElementById('fGithubUrl') || {}).value ? document.getElementById('fGithubUrl').value.trim() : '';
+                if (gh) fd.append('githubUrl', gh);
+                var thumb = document.getElementById('fThumbnail');
+                if (thumb && thumb.files && thumb.files[0]) fd.append('thumbnail', thumb.files[0]);
+                var r = await fetch(url, { method: method, body: fd });
+                if (r.ok) { closeModal(); loadProjects(); loadDashboard(); toast('Project saved!', 'success'); }
+                else { var err2 = await r.json(); toast(err2.error || 'Failed', 'error'); }
+            } else if (type === 'material') {
+                var fd2 = new FormData();
+                var title2 = (document.getElementById('fTitle') || {}).value ? document.getElementById('fTitle').value.trim() : '';
+                var desc2 = (document.getElementById('fDesc') || {}).value ? document.getElementById('fDesc').value.trim() : '';
+                var cat2 = (document.getElementById('fCat') || {}).value;
+                if (!title2) { toast('Title is required', 'error'); return; }
+                if (!desc2) { toast('Description is required', 'error'); return; }
+                if (!cat2) { toast('Category is required', 'error'); return; }
+                fd2.append('title', title2);
+                fd2.append('description', desc2);
+                fd2.append('category', cat2);
+                fd2.append('examType', (document.getElementById('fExamType') || {}).value || 'notes');
+                var cp = (document.getElementById('fCustomPath') || {}).value ? document.getElementById('fCustomPath').value.trim() : '';
+                if (cp) fd2.append('customPath', cp);
+                var subj = (document.getElementById('fSubject') || {}).value ? document.getElementById('fSubject').value.trim() : '';
+                if (subj) fd2.append('subject', subj);
+                var grade = (document.getElementById('fGrade') || {}).value ? document.getElementById('fGrade').value.trim() : '';
+                if (grade) fd2.append('grade', grade);
+                var fileEl = document.getElementById('fFile');
+                if (fileEl && fileEl.files && fileEl.files[0]) fd2.append('file', fileEl.files[0]);
+                var wm = document.getElementById('fWatermark');
+                fd2.append('addWatermark', (wm && wm.checked) || false);
+                var ext = (document.getElementById('fExternalLink') || {}).value ? document.getElementById('fExternalLink').value.trim() : '';
+                if (ext) fd2.append('externalLink', ext);
+                var res3 = await fetch(url, { method: method, body: fd2 });
+                if (res3.ok) { closeModal(); loadMaterials(); loadDashboard(); toast('Material saved!', 'success'); }
+                else { var err3 = await res3.json(); toast(err3.error || 'Failed', 'error'); }
+            }
+        } catch (e) { toast('Network error: ' + e.message, 'error'); }
+    }
+
+    async function deleteItem(type, id) {
+        if (!confirm('Delete permanently? This cannot be undone.')) return;
+        var paths = { categories: '/api/admin/categories', projects: '/api/admin/projects', materials: '/api/admin/materials' };
+        try {
+            var res = await fetch(A + paths[type] + '/' + id, { method: 'DELETE' });
+            if (res.ok) {
+                if (type === 'categories') loadCategories();
+                else if (type === 'projects') { loadProjects(); loadDashboard(); }
+                else { loadMaterials(); loadDashboard(); }
+                toast('Deleted', 'success');
+            } else { var err = await res.json(); toast(err.error || 'Failed', 'error'); }
+        } catch (e) { toast('Network error', 'error'); }
+    }
+
+    async function viewMessage(id) {
+        try {
+            await fetch(A + '/api/admin/messages/' + id + '/read', { method: 'PUT' });
+            var list = await (await fetch(A + '/api/admin/messages')).json();
+            var m = (Array.isArray(list) ? list : []).find(function (x) { return x._id === id; });
+            if (m) {
+                document.getElementById('modalContent').innerHTML =
+                    '<h3>Message from ' + esc(m.name) + '</h3>' +
+                    '<p style="color:var(--text-dim);font-size:11px;margin-bottom:14px">' + esc(m.email) + ' · ' + new Date(m.createdAt).toLocaleString() + '</p>' +
+                    '<p style="margin-bottom:6px"><strong>Subject:</strong> ' + esc(m.subject || 'N/A') + '</p>' +
+                    '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px;line-height:1.7;color:var(--text-secondary);font-size:13px">' + esc(m.message) + '</div>' +
+                    '<div class="form-actions"><button type="button" class="btn" id="mc">Close</button></div>';
+                document.getElementById('modalOverlay').style.display = 'flex';
+                document.getElementById('mc').addEventListener('click', closeModal);
+                loadMessages();
+            }
+        } catch (e) {}
+    }
+
+    function toast(msg, type) {
+        var existing = document.querySelector('.toast');
+        if (existing) existing.remove();
+        var el = document.createElement('div');
+        el.className = 'toast toast-' + type;
+        el.textContent = msg;
+        document.body.appendChild(el);
+        setTimeout(function () {
+            el.style.opacity = '0';
+            el.style.transition = 'opacity 0.3s';
+            setTimeout(function () { el.remove(); }, 300);
+        }, 2500);
+    }
+
+    function esc(s) {
+        if (!s) return '';
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    document.getElementById('modalOverlay').addEventListener('click', function (e) {
+        if (e.target === this) closeModal();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeModal();
+    });
+    document.querySelectorAll('.admin-nav button[data-section]').forEach(function (b) {
+        b.addEventListener('click', function () { switchSection(b.dataset.section); });
+    });
+    document.getElementById('logoutBtn').addEventListener('click', function () { window.location.href = '/auth/logout'; });
+    document.getElementById('addCategoryBtn').addEventListener('click', function () { openModal('category'); });
+    document.getElementById('addProjectBtn').addEventListener('click', function () { openModal('project'); });
+    document.getElementById('addMaterialBtn').addEventListener('click', function () { openModal('material'); });
+
+    (async function () {
+        if (await checkAuth()) {
+            loadDashboard();
+            loadCategories();
+            loadMessages();
+        }
+    })();
+})();
