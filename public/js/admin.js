@@ -52,6 +52,13 @@
                     return '<tr><td>' + esc(m.title) + '</td><td>' + esc(m.category && m.category.name ? m.category.name : '—') + '</td><td><span class="badge badge-gold">' + (m.type || 'note') + '</span></td><td>' + new Date(m.createdAt).toLocaleDateString() + '</td></tr>';
                 }).join('')
                 : '<tr class="empty-row"><td colspan="4">No materials</td></tr>';
+            try {
+                var dbStats = await (await fetch(A + '/api/admin/db-stats')).json();
+                var spaceCard = document.createElement('div');
+                spaceCard.className = 'stat-card';
+                spaceCard.innerHTML = '<div class="stat-value">' + (dbStats.totalSizeMB || 0) + ' MB</div><div class="stat-label">DB Space Used</div>';
+                document.getElementById('dashboardStats').appendChild(spaceCard);
+            } catch (e) {}
         } catch (e) { toast('Failed to load dashboard', 'error'); }
     }
 
@@ -95,6 +102,14 @@
                 : '<tr class="empty-row"><td colspan="5">No materials</td></tr>';
             document.querySelectorAll('#materialsBody [data-edit]').forEach(function (b) { b.addEventListener('click', function () { openModal('material', b.dataset.edit); }); });
             document.querySelectorAll('#materialsBody [data-del]').forEach(function (b) { b.addEventListener('click', function () { deleteItem('materials', b.dataset.del); }); });
+            try {
+                var large = await (await fetch(A + '/api/admin/large-pdfs')).json();
+                var btn = document.getElementById('compressAllBtn');
+                if (btn) {
+                    if (Array.isArray(large) && large.length > 0) { btn.style.display = 'inline-flex'; btn.innerHTML = '<i class="fas fa-compress"></i> Compress ' + large.length + ' Large PDF(s)'; }
+                    else { btn.style.display = 'none'; }
+                }
+            } catch (e) {}
         } catch (e) { toast('Failed', 'error'); }
     }
 
@@ -180,9 +195,18 @@
         if (type === 'project' || type === 'material') loadCatOpts();
         if (id) loadEditData(type, id);
 
-        document.getElementById('mf').addEventListener('submit', function (e) {
+        document.getElementById('mf').addEventListener('submit', async function (e) {
             e.preventDefault();
-            saveForm(type);
+            var submitBtn = this.querySelector('button[type="submit"]');
+            var originalHtml = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+            try {
+                await saveForm(type);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalHtml;
+            }
         });
 
         if (type === 'material' && !id) {
@@ -361,6 +385,31 @@
         } catch (e) {}
     }
 
+    async function compressLargePDFs() {
+        var btn = document.getElementById('compressAllBtn');
+        var large = await (await fetch(A + '/api/admin/large-pdfs')).json();
+        if (!Array.isArray(large) || !large.length) return;
+        if (!confirm('Compress ' + large.length + ' PDF(s) larger than 10 MB? This may take a moment.')) return;
+        var orig = btn.innerHTML;
+        btn.disabled = true;
+        var totalSaved = 0, success = 0, failed = 0;
+        for (var i = 0; i < large.length; i++) {
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (i + 1) + '/' + large.length;
+            try {
+                var r = await (await fetch(A + '/api/admin/materials/' + large[i]._id + '/compress', { method: 'POST' })).json();
+                if (r.success) { totalSaved += r.saved; success++; } else { failed++; }
+            } catch (e) { failed++; }
+        }
+        btn.disabled = false;
+        btn.innerHTML = orig;
+        loadMaterials();
+        loadDashboard();
+        var msg = 'Compressed ' + success + ' file(s)';
+        if (totalSaved > 0) msg += ', saved ' + (Math.round(totalSaved / 1024 / 1024 * 100) / 100) + ' MB';
+        if (failed > 0) msg += ', ' + failed + ' failed';
+        toast(msg, failed > 0 ? 'error' : 'success');
+    }
+
     function toast(msg, type) {
         var existing = document.querySelector('.toast');
         if (existing) existing.remove();
@@ -395,6 +444,7 @@
     document.getElementById('addCategoryBtn').addEventListener('click', function () { openModal('category'); });
     document.getElementById('addProjectBtn').addEventListener('click', function () { openModal('project'); });
     document.getElementById('addMaterialBtn').addEventListener('click', function () { openModal('material'); });
+    document.getElementById('compressAllBtn').addEventListener('click', compressLargePDFs);
 
     (async function () {
         if (await checkAuth()) {
