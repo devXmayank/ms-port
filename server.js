@@ -69,10 +69,11 @@ const categorySchema = new mongoose.Schema({ name: { type: String, required: tru
 const Category = mongoose.model('Category', categorySchema);
 
 const projectSchema = new mongoose.Schema({ title: { type: String, required: true }, slug: { type: String, unique: true }, shareableLink: { type: String, unique: true, sparse: true }, description: { type: String, required: true }, longDescription: String, category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' }, status: { type: String, enum: ['planning', 'in-progress', 'completed', 'on-hold', 'live', 'disabled'], default: 'planning' }, progress: { type: Number, min: 0, max: 100, default: 0 }, techStack: [String], liveUrl: String, githubUrl: String, thumbnail: String, images: [String], isFeatured: { type: Boolean, default: false }, views: { type: Number, default: 0 }, viewHistory: [{ ip: String, timestamp: { type: Date, default: Date.now } }], createdAt: { type: Date, default: Date.now }, updatedAt: { type: Date, default: Date.now } });
-projectSchema.pre('save', function(next) { if (!this.slug) this.slug = this.title.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-') + '-' + crypto.randomBytes(4).toString('hex'); if (!this.shareableLink) this.shareableLink = crypto.randomBytes(8).toString('hex'); this.updatedAt = new Date(); next(); });
+projectSchema.pre('save', function(next) { if (!this.slug) this.slug = this.title.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-') + '-' + crypto.randomBytes(4).toString('hex'); if (!this.shareableLink) this.shareableLink = crypto.randomBytes(8).toString('hex'); if (!this.isNew) this.updatedAt = new Date(); next(); });
 const Project = mongoose.model('Project', projectSchema);
 
 function slugify(input) { return String(input || '').toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, ''); }
+function buildPdfName(title, examType) { const base = slugify(title || 'material'); const type = examType || 'notes'; return `${base}-${type}.pdf`; }
 
 const materialSchema = new mongoose.Schema({
     title: { type: String, required: true },
@@ -422,7 +423,6 @@ async function addPDFWatermark(inputPath, outputPath) {
                     A: { Type: 'Action', S: 'URI', URI: pdfDoc.context.obj(footerUrl) }
                 });
                 const ref = pdfDoc.context.register(linkAnnot);
-                const existing = page.node.lookup(page.node.get(pdfDoc.context.obj('Annots')?.toString?.() || 'Annots'));
                 let annotsArray = page.node.Annots && page.node.Annots();
                 if (annotsArray && typeof annotsArray.push === 'function') {
                     annotsArray.push(ref);
@@ -430,13 +430,39 @@ async function addPDFWatermark(inputPath, outputPath) {
                     const newArr = pdfDoc.context.obj([ref]);
                     page.node.set(pdfDoc.context.obj('Annots'), newArr);
                 }
-            } catch (linkErr) {
-            }
+            } catch (linkErr) {}
         }
         const pdfBytes = await pdfDoc.save();
         fs.writeFileSync(outputPath, pdfBytes);
         return outputPath;
     } catch (err) { console.error('PDF watermark error:', err.message); return inputPath; }
+}
+
+const ILovePDFApi = require('@ilovepdf/ilovepdf-nodejs');
+const ILovePDFFile = require('@ilovepdf/ilovepdf-nodejs/ILovePDFFile');
+
+async function compressPDF(inputPath, outputPath) {
+    try {
+        if (!process.env.ILOVEPDF_PUBLIC_KEY || !process.env.ILOVEPDF_SECRET_KEY) {
+            console.warn('iLovePDF keys missing, skipping compression');
+            return inputPath;
+        }
+        const instance = new ILovePDFApi(process.env.ILOVEPDF_PUBLIC_KEY, process.env.ILOVEPDF_SECRET_KEY);
+        const task = instance.newTask('compress');
+        await task.start();
+        const file = new ILovePDFFile(inputPath);
+        await task.addFile(file);
+        await task.process({ compression_level: 'recommended' });
+        const data = await task.download();
+        fs.writeFileSync(outputPath, data);
+        const originalSize = fs.statSync(inputPath).size;
+        const compressedSize = fs.statSync(outputPath).size;
+        console.log(`PDF compressed: ${originalSize} → ${compressedSize} bytes (${Math.round((1 - compressedSize / originalSize) * 100)}% saved)`);
+        return compressedSize < originalSize ? outputPath : inputPath;
+    } catch (err) {
+        console.error('PDF compression failed:', err.message);
+        return inputPath;
+    }
 }
 
 async function addImageWatermark(inputPath, outputPath) {
@@ -500,11 +526,20 @@ app.post('/api/admin/materials', requireAuth, requireVerified, upload.single('fi
                 if (file.mimetype === 'application/pdf') finalPath = await addPDFWatermark(file.path, watermarkedPath + '.pdf');
                 else if (file.mimetype.startsWith('image/')) finalPath = await addImageWatermark(file.path, watermarkedPath + '.png');
             }
-            if (file.mimetype === 'application/pdf' && gfs) {
-                const stream = gfs.openUploadStream(file.originalname, { contentType: file.mimetype });
-                fs.createReadStream(finalPath).pipe(stream);
-                await new Promise((resolve, reject) => { stream.on('finish', resolve); stream.on('error', reject); });
-                data.storage = 'mongo'; data.fileId = stream.id; data.fileName = file.originalname; data.fileSize = fs.statSync(finalPath).size; data.type = 'pdf';
+            if (file.mimetype === 'application/pdf') {
+                const compressedPath = file.path + '_compressed.pdf';
+                const result = await compressPDF(finalPath, compressedPath);
+                if (result === compressedPath) {
+                    if (finalPath !== file.path) fs.unlink(finalPath, () => {});
+                    finalPath = compressedPath;
+                }
+                if (gfs) {
+                    const pdfName = buildPdfName(data.title, data.examType);
+                    const stream = gfs.openUploadStream(pdfName, { contentType: file.mimetype });
+                    fs.createReadStream(finalPath).pipe(stream);
+                    await new Promise((resolve, reject) => { stream.on('finish', resolve); stream.on('error', reject); });
+                    data.storage = 'mongo'; data.fileId = stream.id; data.fileName = pdfName; data.fileSize = fs.statSync(finalPath).size; data.type = 'pdf';
+                }
             } else if (file.mimetype.startsWith('image/')) {
                 const result = await cloudinary.uploader.upload(finalPath, { folder: 'portfolio/materials' });
                 data.storage = 'cloudinary'; data.fileUrl = result.secure_url; data.fileName = file.originalname; data.fileSize = fs.statSync(finalPath).size; data.type = 'image';
@@ -539,12 +574,21 @@ app.put('/api/admin/materials/:id', requireAuth, requireVerified, upload.single(
                 if (req.file.mimetype === 'application/pdf') finalPath = await addPDFWatermark(req.file.path, wp + '.pdf');
                 else if (req.file.mimetype.startsWith('image/')) finalPath = await addImageWatermark(req.file.path, wp + '.png');
             }
-            if (req.file.mimetype === 'application/pdf' && gfs) {
-                if (updates.fileId && mongoose.isValidObjectId(updates.fileId)) { try { await gfs.delete(new mongoose.Types.ObjectId(updates.fileId)); } catch (e) {} }
-                const stream = gfs.openUploadStream(req.file.originalname, { contentType: req.file.mimetype });
-                fs.createReadStream(finalPath).pipe(stream);
-                await new Promise((r, j) => { stream.on('finish', r); stream.on('error', j); });
-                updates.storage = 'mongo'; updates.fileId = stream.id; updates.fileUrl = undefined; updates.fileName = req.file.originalname; updates.fileSize = fs.statSync(finalPath).size; updates.type = 'pdf';
+            if (req.file.mimetype === 'application/pdf') {
+                const compressedPath = req.file.path + '_compressed.pdf';
+                const result = await compressPDF(finalPath, compressedPath);
+                if (result === compressedPath) {
+                    if (finalPath !== req.file.path) fs.unlink(finalPath, () => {});
+                    finalPath = compressedPath;
+                }
+                if (gfs) {
+                    if (updates.fileId && mongoose.isValidObjectId(updates.fileId)) { try { await gfs.delete(new mongoose.Types.ObjectId(updates.fileId)); } catch (e) {} }
+                    const pdfName = buildPdfName(updates.title || req.body.title || 'material', updates.examType || req.body.examType);
+                    const stream = gfs.openUploadStream(pdfName, { contentType: req.file.mimetype });
+                    fs.createReadStream(finalPath).pipe(stream);
+                    await new Promise((r, j) => { stream.on('finish', r); stream.on('error', j); });
+                    updates.storage = 'mongo'; updates.fileId = stream.id; updates.fileUrl = undefined; updates.fileName = pdfName; updates.fileSize = fs.statSync(finalPath).size; updates.type = 'pdf';
+                }
             } else {
                 const result = await cloudinary.uploader.upload(finalPath, { folder: 'portfolio/materials', resource_type: req.file.mimetype === 'application/pdf' ? 'raw' : 'auto' });
                 updates.storage = 'cloudinary'; updates.fileUrl = result.secure_url; updates.fileName = req.file.originalname; updates.fileSize = fs.statSync(finalPath).size; updates.type = req.file.mimetype === 'application/pdf' ? 'pdf' : req.file.mimetype.startsWith('image/') ? 'image' : 'document';
@@ -560,6 +604,63 @@ app.put('/api/admin/materials/:id', requireAuth, requireVerified, upload.single(
 });
 
 app.delete('/api/admin/materials/:id', requireAuth, requireVerified, async (req, res) => { try { await Material.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (err) { res.status(400).json({ error: err.message }); } });
+
+app.get('/api/admin/large-pdfs', requireAuth, requireVerified, async (req, res) => {
+    try {
+        const threshold = 10 * 1024 * 1024;
+        const large = await Material.find({ type: 'pdf', storage: 'mongo', fileId: { $exists: true, $ne: null }, fileSize: { $gt: threshold } }).select('title fileName fileSize fileId customPath slug examType').lean();
+        res.json(large);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin/materials/:id/compress', requireAuth, requireVerified, async (req, res) => {
+    try {
+        const material = await Material.findById(req.params.id);
+        if (!material) return res.status(404).json({ error: 'Not found' });
+        if (!material.fileId || !gfs) return res.status(400).json({ error: 'No GridFS file' });
+        const chunks = mongoose.connection.db.collection('materials.chunks');
+        const cursor = chunks.find({ files_id: new mongoose.Types.ObjectId(material.fileId) }).sort({ n: 1 });
+        const tmpIn = path.join('uploads', 'compress_in_' + Date.now() + '.pdf');
+        const tmpOut = path.join('uploads', 'compress_out_' + Date.now() + '.pdf');
+        const writeStream = fs.createWriteStream(tmpIn);
+        for await (const chunk of cursor) writeStream.write(chunk.data.buffer);
+        await new Promise(r => writeStream.end(r));
+        const result = await compressPDF(tmpIn, tmpOut);
+        if (result !== tmpOut || !fs.existsSync(tmpOut)) {
+            fs.unlink(tmpIn, () => {});
+            return res.status(400).json({ error: 'Compression produced no smaller file' });
+        }
+        try { await gfs.delete(new mongoose.Types.ObjectId(material.fileId)); } catch (e) {}
+        const pdfName = material.fileName || buildPdfName(material.title, material.examType);
+        const stream = gfs.openUploadStream(pdfName, { contentType: 'application/pdf' });
+        fs.createReadStream(tmpOut).pipe(stream);
+        await new Promise((resolve, reject) => { stream.on('finish', resolve); stream.on('error', reject); });
+        const oldSize = material.fileSize;
+        const newSize = fs.statSync(tmpOut).size;
+        material.fileId = stream.id;
+        material.fileSize = newSize;
+        material.fileName = pdfName;
+        material.updatedAt = new Date();
+        await material.save();
+        fs.unlink(tmpIn, () => {});
+        fs.unlink(tmpOut, () => {});
+        res.json({ success: true, oldSize, newSize, saved: oldSize - newSize });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/db-stats', requireAuth, requireVerified, async (req, res) => {
+    try {
+        const dbStats = await mongoose.connection.db.stats({ scale: 1024 * 1024 });
+        res.json({
+            storageSizeMB: Math.round(dbStats.storageSize * 100) / 100,
+            dataSizeMB: Math.round(dbStats.dataSize * 100) / 100,
+            indexSizeMB: Math.round(dbStats.indexSize * 100) / 100,
+            totalSizeMB: Math.round((dbStats.storageSize + dbStats.indexSize) * 100) / 100,
+            collections: dbStats.collections,
+            objects: dbStats.objects
+        });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 app.get('/api/admin/stats', requireAuth, requireVerified, async (req, res) => {
     try {

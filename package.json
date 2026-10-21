@@ -12,7 +12,8 @@
     "hash-password": "node -e \"require('bcrypt').hash(process.argv[1], 12).then(h => console.log(h))\""
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "@ilovepdf/ilovepdf-nodejs": "^0.3.1",
+    "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.4.0",
     "connect-mongo": "^5.1.0",
