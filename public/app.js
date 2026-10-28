@@ -2,6 +2,7 @@ const API = window.location.origin;
 let currentPage = 1, totalPages = 1, currentCategory = 'all', currentExamType = 'all', currentProjectStatus = 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
+    initTelegramPopup();
     initNavbar();
     initMobileMenu();
     if (document.getElementById('hc')) initHero3D();
@@ -193,13 +194,16 @@ async function loadMaterials() {
 
 function renderMaterialRow(m, i) {
     const isLink = m.type === 'link' || m.storage === 'external-link';
+    const isPdf = m.type === 'pdf' && (m.fileUrl || m.fileId);
     const hasFile = m.fileUrl || m.fileId;
     const typeLabel = m.type || 'note';
     const path = m.customPath ? `/${m.customPath}` : `/materials?open=${m.slug}`;
-        const updated = m.updatedAt && m.createdAt && (new Date(m.updatedAt).getTime() - new Date(m.createdAt).getTime() > 60000) ? `<span style="color:var(--accent);font-size:11px"><i class="fas fa-sync"></i> Updated ${new Date(m.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>` : '';
+    const updated = m.updatedAt && m.createdAt && (new Date(m.updatedAt).getTime() - new Date(m.createdAt).getTime() > 60000) ? `<span style="color:var(--accent);font-size:11px"><i class="fas fa-sync"></i> Updated ${new Date(m.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>` : '';
     const action = isLink
         ? (m.fileUrl ? `<a class="btn btn-outline btn-sm open-btn" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer" title="Open link"><i class="fas fa-external-link-alt"></i></a>` : '')
-        : (hasFile ? `<button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}" title="Download"><i class="fas fa-download"></i></button>` : '');
+        : (isPdf
+            ? `<a class="btn btn-outline btn-sm" href="/api/materials/id/${m._id}/view" target="_blank" rel="noopener" title="Open PDF"><i class="fas fa-eye"></i></a><button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}" title="Download"><i class="fas fa-download"></i></button>`
+            : (hasFile ? `<button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}" title="Download"><i class="fas fa-download"></i></button>` : ''));
     return `<div class="material-row" data-slug="${m.slug || ''}" data-path="${esc(m.customPath || '')}" data-share="${m.customPath || m.shareableLink || m.slug}" data-title="${esc(m.title)}" style="animation-delay:${i * 0.05}s"><div class="material-info"><h3>${esc(m.title)}</h3><div class="meta"><span>${esc(m.category?.name || 'General')}</span>${m.subject ? `<span>${esc(m.subject)}</span>` : ''}${m.grade ? `<span>Grade ${esc(m.grade)}</span>` : ''}${m.customPath ? `<span style="font-family:var(--font-mono);color:var(--accent)">${path}</span>` : ''}${updated}</div></div><span class="material-type-badge badge-${typeLabel}">${typeLabel}</span><span class="material-date">${new Date(m.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span><div style="display:flex;gap:6px">${action}<button class="btn btn-outline btn-sm share-btn" data-share="${m.customPath || m.shareableLink || m.slug}" data-title="${esc(m.title)}" title="Share"><i class="fas fa-share-alt"></i></button></div></div>`;
 }
 
@@ -227,23 +231,26 @@ async function openMaterialModal(slug) {
     try {
         const m = await (await fetch(`/api/materials/${encodeURIComponent(slug)}`)).json(); if (m.error) return showToast('Not found', 'error');
         const isLink = m.type === 'link' || m.storage === 'external-link';
+        const isPdf = m.type === 'pdf' && (m.fileUrl || m.fileId);
         const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
         const sharePath = m.customPath || m.shareableLink || m.slug;
         const updatedBadge = m.updatedAt && m.createdAt && (new Date(m.updatedAt).getTime() - new Date(m.createdAt).getTime() > 60000) ? `<span><i class="fas fa-sync"></i> Updated ${new Date(m.updatedAt).toLocaleDateString()}</span>` : '';
-        const action = isLink
-            ? (m.fileUrl ? `<a class="btn btn-primary" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer"><i class="fas fa-external-link-alt"></i> Open Link</a>` : '')
-            : ((m.fileUrl || m.fileId) ? `<button class="btn btn-primary md-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}"><i class="fas fa-download"></i> Download</button>` : '');
+        let action = '';
+        if (isLink && m.fileUrl) action = `<a class="btn btn-primary" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer"><i class="fas fa-external-link-alt"></i> Open Link</a>`;
+        else if (isPdf) action = `<a class="btn btn-primary" href="/api/materials/id/${m._id}/view" target="_blank" rel="noopener"><i class="fas fa-eye"></i> Open PDF</a><button class="btn btn-outline md-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}"><i class="fas fa-download"></i> Download</button>`;
+        else if (m.fileUrl || m.fileId) action = `<button class="btn btn-primary md-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}"><i class="fas fa-download"></i> Download</button>`;
         overlay.innerHTML = `<div class="modal"><button class="modal-close">&times;</button><span class="material-type-badge badge-${m.type || 'note'}" style="margin-bottom:16px;display:inline-block">${m.type || 'note'}</span><h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:12px">${esc(m.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(m.description)}</p><div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--text-secondary)">${m.category ? `<span><strong>Category:</strong> ${esc(m.category.name)}</span>` : ''}${m.subject ? `<span><strong>Subject:</strong> ${esc(m.subject)}</span>` : ''}${m.grade ? `<span><strong>Grade:</strong> ${esc(m.grade)}</span>` : ''}</div>${m.customPath ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-bottom:14px">Path: <strong>/${esc(m.customPath)}</strong></div>` : ''}<div style="display:flex;gap:12px;margin-bottom:16px;font-size:11px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${m.views || 0}</span><span><i class="fas fa-download"></i> ${m.downloads || 0}</span><span>${new Date(m.createdAt).toLocaleDateString()}</span>${updatedBadge}</div><div style="display:flex;gap:10px;flex-wrap:wrap">${action}<button class="btn btn-outline modal-share-btn" data-share="${esc(sharePath)}" data-title="${esc(m.title)}"><i class="fas fa-share-alt"></i> Share</button><button class="btn btn-outline mc-btn">Close</button></div></div>`;
         document.body.appendChild(overlay); document.body.style.overflow = 'hidden';
         const close = () => { overlay.remove(); document.body.style.overflow = ''; };
         overlay.querySelector('.modal-close').addEventListener('click', close); overlay.querySelector('.mc-btn').addEventListener('click', close);
         overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
         document.addEventListener('keydown', function esc2(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); } });
-        const db = overlay.querySelector('.md-btn'); if (db) db.addEventListener('click', () => downloadMaterial(db.dataset.id, db.dataset.filename));
-        const ob = overlay.querySelector('a[href]'); if (ob) ob.addEventListener('click', () => showDownloadToast('Opening link…'));
+        overlay.querySelectorAll('.md-btn').forEach(btn => btn.addEventListener('click', () => downloadMaterial(btn.dataset.id, btn.dataset.filename)));
+        const ob = overlay.querySelector('a[href*="/view"]'); if (ob) ob.addEventListener('click', () => showDownloadToast('Opening PDF…'));
         const sb = overlay.querySelector('.modal-share-btn'); if (sb) sb.addEventListener('click', function() { showShareSheet(this.dataset.share, this.dataset.title); });
     } catch (e) { showToast('Failed to load', 'error'); }
 }
+
 
 function downloadMaterial(id, filename) {
     showDownloadToast('Your download will start shortly…');
@@ -357,6 +364,29 @@ function showShareSheet(sharePath, title) {
     });
     document.addEventListener('keydown', function esc3(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc3); } });
 }
+
+
+function initTelegramPopup() {
+    if (localStorage.getItem('telegram-popup-dismissed') === '1') return;
+    fetch('/api/admin/telegram-info').then(r => r.json()).then(info => {
+        if (!info.channelUrl) return;
+        var popup = document.createElement('div');
+        popup.id = 'tg-popup';
+        popup.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120%);max-width:460px;width:calc(100% - 32px);background:#141317;border:1px solid rgba(201,166,104,0.35);border-radius:16px;padding:16px 18px;box-shadow:0 20px 60px rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;gap:14px;transition:transform .4s cubic-bezier(0.19,1,0.22,1);font-family:Inter,sans-serif';
+        popup.innerHTML = '<div style="width:44px;height:44px;flex-shrink:0;border-radius:50%;background:rgba(201,166,104,0.15);display:flex;align-items:center;justify-content:center;color:#c9a668;font-size:20px"><i class="fab fa-telegram"></i></div><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:#e8e4dd;margin-bottom:2px">Join Our Telegram</div><div style="font-size:11px;color:#8a8780;line-height:1.4">Get updates & latest uploads first</div></div><a href="' + info.channelUrl + '" target="_blank" rel="noopener" style="padding:8px 14px;background:#c9a668;color:#0d0c0f;border-radius:20px;text-decoration:none;font-size:11px;font-weight:700;white-space:nowrap">Join</a><button id="tg-close" style="background:none;border:none;color:#5c5954;font-size:18px;cursor:pointer;padding:0 4px;line-height:1">&times;</button>';
+        document.body.appendChild(popup);
+        requestAnimationFrame(() => { popup.style.transform = 'translateX(-50%) translateY(0)'; });
+        popup.querySelector('#tg-close').addEventListener('click', () => {
+            popup.style.transform = 'translateX(-50%) translateY(120%)';
+            localStorage.setItem('telegram-popup-dismissed', '1');
+            setTimeout(() => popup.remove(), 400);
+        });
+        popup.querySelector('a').addEventListener('click', () => {
+            localStorage.setItem('telegram-popup-dismissed', '1');
+        });
+    }).catch(() => {});
+}
+
 
 function showToast(msg, type = 'info') { const existing = document.querySelector('.toast'); if (existing) existing.remove(); const toast = document.createElement('div'); toast.className = `toast toast-${type}`; toast.textContent = msg; document.body.appendChild(toast); setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'all 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000); }
 
