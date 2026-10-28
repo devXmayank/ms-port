@@ -61,6 +61,7 @@ app.use('/api/', globalLimiter);
 const contactLimiter = rateLimit({ windowMs: 24 * 60 * 60 * 1000, max: 1, keyGenerator: (req) => req.ip, message: { error: 'You can only send one message per day. Please try again later.' } });
 const chatLimiter = rateLimit({ windowMs: 60 * 1000, max: 15, keyGenerator: (req) => req.ip, message: { reply: 'Slow down a bit — please wait before sending more messages.' } });
 const authLimiter = rateLimit({ windowMs: 900000, max: 10, message: { error: 'Too many attempts' } });
+const broadcastLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, keyGenerator: (req) => req.ip, message: { error: 'Too many broadcasts. Wait a minute.' } });
 
 const adminSchema = new mongoose.Schema({ googleId: { type: String, unique: true, sparse: true }, email: { type: String, required: true, unique: true, lowercase: true }, verifiedAt: Date, lastLogin: Date, createdAt: { type: Date, default: Date.now } });
 const Admin = mongoose.model('Admin', adminSchema);
@@ -104,7 +105,7 @@ materialSchema.pre('save', function(next) {
     if (!this.slug) this.slug = slugify(this.title) + '-' + crypto.randomBytes(4).toString('hex');
     if (!this.shareableLink) this.shareableLink = crypto.randomBytes(8).toString('hex');
     if (!this.customPath && this.title) this.customPath = slugify(this.title);
-    this.updatedAt = new Date();
+    if (!this.isNew) this.updatedAt = new Date();
     next();
 });
 const Material = mongoose.model('Material', materialSchema);
@@ -155,6 +156,50 @@ async function sendTelegramNotification(name, email, subject, message) {
     if (!botToken || !chatId) return;
     const text = `📬 *New Message from CODE & CLASSROOM*\n\n👤 *Name:* ${name}\n📧 *Email:* ${email}\n📝 *Subject:* ${subject || 'N/A'}\n💬 *Message:* ${message}\n📅 *Date:* ${new Date().toLocaleString()}`;
     try { await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' }) }); } catch (err) { console.error('Telegram notification failed:', err.message); }
+}
+
+async function sendTelegramChannel(text, previewUrl) {
+    const botToken = process.env.TELEGRAM_CHANNEL_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHANNEL_CHAT_ID;
+    if (!botToken || !chatId) return { ok: false, error: 'Channel bot not configured' };
+    try {
+        const body = { chat_id: chatId, text, parse_mode: 'Markdown' };
+        if (!previewUrl) body.disable_web_page_preview = true;
+        const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        return await r.json();
+    } catch (err) { return { ok: false, error: err.message }; }
+}
+
+function mdEscape(s) { return String(s || '').replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1'); }
+
+function buildMaterialBroadcast(mat) {
+    const base = 'https://mayanksagar.onrender.com';
+    const link = `${base}/${mat.customPath || 'materials?open=' + mat.slug}`;
+    const type = (mat.examType || mat.type || 'resource').replace('-', ' ');
+    const cat = mat.category && mat.category.name ? mat.category.name : '';
+    let msg = `📚 *New Material Added*\n\n`;
+    msg += `*${mdEscape(mat.title)}*\n`;
+    if (cat) msg += `📂 ${mdEscape(cat)}\n`;
+    if (mat.subject) msg += `📖 ${mdEscape(mat.subject)}${mat.grade ? ' · Grade ' + mdEscape(mat.grade) : ''}\n`;
+    msg += `🏷 ${mdEscape(type)}\n\n`;
+    msg += `🔗 [Open Material](${link})\n\n`;
+    msg += `_via CODE & CLASSROOM_`;
+    return { text: msg, link };
+}
+
+function buildProjectBroadcast(project) {
+    const base = 'https://mayanksagar.onrender.com';
+    const link = `${base}/projects`;
+    let msg = `🚀 *New Project Launched*\n\n`;
+    msg += `*${mdEscape(project.title)}*\n`;
+    msg += `📊 Status: ${mdEscape(project.status || 'planning')}\n`;
+    if (project.techStack && project.techStack.length) msg += `🛠 ${mdEscape(project.techStack.slice(0, 5).join(', '))}\n`;
+    msg += `\n${mdEscape((project.description || '').slice(0, 200))}\n\n`;
+    if (project.liveUrl) msg += `🌐 [Live Demo](${project.liveUrl})\n`;
+    if (project.githubUrl) msg += `💻 [Source Code](${project.githubUrl})\n`;
+    msg += `\n🔗 [View all projects](${link})\n\n`;
+    msg += `_via CODE & CLASSROOM_`;
+    return { text: msg, link };
 }
 
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account' }));
@@ -255,6 +300,53 @@ app.get('/api/materials/share/:shareableLink', async (req, res) => {
     try { const material = await Material.findOne({ shareableLink: req.params.shareableLink }).populate('category', 'name slug').lean(); if (!material) return res.status(404).json({ error: 'Not found' }); Material.findByIdAndUpdate(material._id, { $inc: { views: 1 } }).catch(() => {}); res.json(material); } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/materials/id/:id/view', async (req, res) => {
+    try {
+        const material = await Material.findById(req.params.id).populate('category', 'name slug').lean();
+        if (!material) return res.status(404).send('Not found');
+        const rawUrl = `/api/materials/id/${material._id}/raw`;
+        const dlUrl = `/api/materials/id/${material._id}/download`;
+        const title = htmlEscape(material.title || 'Study Material');
+        const desc = htmlEscape((material.description || '').slice(0, 180));
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${title} — CODE & CLASSROOM</title><meta name="description" content="${desc}"><meta property="og:title" content="${title} — CODE & CLASSROOM"><meta property="og:description" content="${desc}"><meta property="og:type" content="article"><meta property="og:image" content="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="icon" type="image/x-icon" href="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"><style>:root{--bg:#0d0c0f;--bg-elevated:#141317;--bg-card:#1a191e;--text:#e8e4dd;--text-secondary:#8a8780;--text-dim:#5c5954;--accent:#c9a668;--border:rgba(255,255,255,0.06);--radius:12px;--radius-full:100px;--font-display:'Fraunces',Georgia,serif;--font-body:'Inter',sans-serif}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;display:flex;flex-direction:column}.topbar{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(13,12,15,0.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;transform:translateY(0);transition:transform .35s cubic-bezier(0.19,1,0.22,1),box-shadow .3s}.topbar.hidden{transform:translateY(-100%);box-shadow:none}.topbar.pinned{transform:translateY(0)!important}.hotzone{position:fixed;top:0;left:0;right:0;height:24px;z-index:11;pointer-events:auto}.back{color:var(--text-secondary);text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:var(--radius-full);transition:all .2s;background:none;border:none;cursor:pointer;font-family:var(--font-body)}.back:hover{color:var(--accent);background:rgba(201,166,104,0.1)}.title{flex:1;min-width:200px;font-family:var(--font-display);font-size:16px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:var(--radius-full);font-family:var(--font-body);font-size:12px;font-weight:600;text-decoration:none;transition:all .2s;cursor:pointer;border:none;letter-spacing:0.03em}.btn-primary{background:linear-gradient(135deg,#c9a668,#e8d5a3,#c9a668);color:#0d0c0f}.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(201,166,104,0.3)}.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-outline:hover{border-color:var(--accent);color:var(--accent)}.btn-sm{padding:7px 12px;font-size:11px}.pin-btn{padding:7px 10px!important}.pin-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(201,166,104,0.1)}.frame-wrap{position:fixed;inset:0;background:#0a0a0c;z-index:1}.frame-wrap iframe{width:100%;height:100%;border:none;display:block}.loader{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--bg);z-index:2;transition:opacity .4s}.loader.hidden{opacity:0;pointer-events:none}.spinner{width:48px;height:48px;border:3px solid rgba(201,166,104,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loader-text{font-size:15px;color:var(--text-secondary);text-align:center;padding:0 20px}.loader-text strong{color:var(--accent);display:block;margin-bottom:6px;font-family:var(--font-display);font-size:18px;font-weight:400}.loader-sub{font-size:12px;color:var(--text-dim);margin-top:8px}.error{display:none;flex-direction:column;align-items:center;gap:16px;padding:40px 20px;text-align:center;color:var(--text-secondary);position:fixed;inset:0;background:var(--bg);z-index:2}.error i{font-size:40px;color:#ef4444}.error.show{display:flex}.hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(20,19,23,0.95);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;padding:6px 14px;border-radius:20px;z-index:5;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}.hint.show{opacity:1}@media(max-width:600px){.title{font-size:14px;width:100%;order:3;flex-basis:100%}.topbar{padding:12px 14px}.btn{padding:8px 14px;font-size:11px}.hint{font-size:10px;padding:5px 12px}}</style></head><body><div class="hotzone" id="hot"></div><div class="topbar" id="top"><a href="/materials" class="back"><i class="fas fa-arrow-left"></i> Back</a><div class="title">${title}</div><button class="btn btn-outline btn-sm pin-btn" id="pinBtn" title="Pin bar"><i class="fas fa-thumbtack"></i></button><a href="${dlUrl}" class="btn btn-primary"><i class="fas fa-download"></i> Download</a></div><div class="frame-wrap"><iframe id="pdfFrame" src="${rawUrl}" title="${title}" allow="fullscreen"></iframe></div><div class="loader" id="ldr"><div class="spinner"></div><div class="loader-text"><strong>Loading your file…</strong>Please wait a moment</div><div class="loader-sub">Large files may take a few seconds</div></div><div class="error" id="err"><i class="fas fa-exclamation-triangle"></i><div><strong>Could not load preview</strong><div class="loader-sub">Your browser may not support inline PDFs. Please use the Download button above.</div></div></div><div class="hint" id="hint"></div><script>(function(){var top=document.getElementById('top'),hot=document.getElementById('hot'),pinBtn=document.getElementById('pinBtn'),hint=document.getElementById('hint'),f=document.getElementById('pdfFrame'),ldr=document.getElementById('ldr'),err=document.getElementById('err');var pinned=false,hideTimer=null,hintTimer=null,done=false;function showBar(){top.classList.remove('hidden');}function hideBar(){if(pinned)return;top.classList.add('hidden');}function scheduleHide(){clearTimeout(hideTimer);hideTimer=setTimeout(hideBar,3000);}function showHint(msg){if(!msg)return;hint.textContent=msg;hint.classList.add('show');clearTimeout(hintTimer);hintTimer=setTimeout(function(){hint.classList.remove('show');},2600);}pinBtn.addEventListener('click',function(){pinned=!pinned;pinBtn.classList.toggle('active',pinned);top.classList.toggle('pinned',pinned);if(pinned){showBar();pinBtn.innerHTML='<i class="fas fa-thumbtack"></i>';showHint('Bar fixed — tap pin again to unpin');}else{pinBtn.innerHTML='<i class="fas fa-thumbtack"></i>';scheduleHide();showHint('Bar auto-hides — move mouse to top to show again');}});hot.addEventListener('mouseenter',function(){showBar();clearTimeout(hideTimer);});hot.addEventListener('mousemove',function(){showBar();clearTimeout(hideTimer);});document.addEventListener('mousemove',function(e){if(e.clientY<60){showBar();clearTimeout(hideTimer);}});top.addEventListener('mouseenter',function(){clearTimeout(hideTimer);});top.addEventListener('mouseleave',function(){if(!pinned)scheduleHide();});document.addEventListener('touchstart',function(e){if(e.touches[0]&&e.touches[0].clientY<60){showBar();clearTimeout(hideTimer);scheduleHide();}},{passive:true});function hideLoader(){if(done)return;done=true;ldr.classList.add('hidden');showHint('Bar auto-hides — move mouse to top to show again');scheduleHide();}f.addEventListener('load',hideLoader);f.addEventListener('readystatechange',function(){try{if(f.contentDocument&&f.contentDocument.readyState==='complete')hideLoader();}catch(e){}});setTimeout(hideLoader,12000);f.addEventListener('error',function(){ldr.classList.add('hidden');err.classList.add('show');showBar();});window.addEventListener('keydown',function(e){if(e.key==='h'||e.key==='H'){if(pinned)return;if(top.classList.contains('hidden')){showBar();scheduleHide();}else{hideBar();}}});})();</script></body></html>`;
+        res.set('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+    } catch (err) { res.status(500).send('Error'); }
+});
+
+app.get('/api/materials/id/:id/raw', async (req, res) => {
+    try {
+        const material = await Material.findById(req.params.id);
+        if (!material) return res.status(404).send('Not found');
+        const safeName = (material.fileName || 'document.pdf').replace(/[^\w.\-]/g, '_');
+        if (material.storage === 'mongo' && material.fileId && gfs) {
+            try {
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+                res.setHeader('Cache-Control', 'private, max-age=3600');
+                const chunks = mongoose.connection.db.collection('materials.chunks');
+                const cursor = chunks.find({ files_id: new mongoose.Types.ObjectId(material.fileId) }).sort({ n: 1 }).allowDiskUse();
+                for await (const chunk of cursor) { res.write(chunk.data.buffer); }
+                res.end();
+                return;
+            } catch (gridErr) {}
+        }
+        if (material.fileUrl) {
+            try {
+                const response = await fetch(material.fileUrl);
+                if (!response.ok) throw new Error('Fetch failed');
+                res.setHeader('Content-Type', 'application/pdf');
+                res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+                res.setHeader('Cache-Control', 'private, max-age=3600');
+                const buffer = await response.arrayBuffer();
+                res.send(Buffer.from(buffer));
+                return;
+            } catch (fetchErr) { return res.redirect(material.fileUrl); }
+        }
+        return res.status(404).send('No file');
+    } catch (err) { res.status(500).send('Error'); }
+});
+
 app.get('/api/materials/id/:id/download', async (req, res) => {
     try {
         const material = await Material.findById(req.params.id);
@@ -332,6 +424,7 @@ app.post('/api/admin/projects', requireAuth, requireVerified, upload.fields([{ n
         if (req.files?.images?.length) { const uploads = await Promise.all(req.files.images.map(f => cloudinary.uploader.upload(f.path, { folder: 'portfolio/projects' }))); data.images = uploads.map(u => u.secure_url); req.files.images.forEach(f => fs.unlink(f.path, () => {})); }
         const project = new Project(data);
         await project.save();
+        if (req.body.broadcast === 'true') { const b = buildProjectBroadcast(project); sendTelegramChannel(b.text, b.link).catch(() => {}); }
         res.status(201).json(await Project.findById(project._id).populate('category', 'name slug'));
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -554,7 +647,9 @@ app.post('/api/admin/materials', requireAuth, requireVerified, upload.single('fi
         }
         const material = new Material(data);
         await material.save();
-        res.status(201).json(await Material.findById(material._id).populate('category', 'name slug'));
+        const populated = await Material.findById(material._id).populate('category', 'name slug');
+        if (req.body.broadcast === 'true') { const b = buildMaterialBroadcast(populated); sendTelegramChannel(b.text, b.link).catch(() => {}); }
+        res.status(201).json(populated);
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
@@ -597,6 +692,7 @@ app.put('/api/admin/materials/:id', requireAuth, requireVerified, upload.single(
             if (finalPath !== req.file.path) fs.unlink(finalPath, () => {});
         }
         if (updates.externalLink) { updates.storage = 'external-link'; updates.fileUrl = updates.externalLink; updates.type = 'link'; delete updates.externalLink; }
+        delete updates.broadcast;
         const material = await Material.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true }).populate('category', 'name slug');
         if (!material) return res.status(404).json({ error: 'Not found' });
         res.json(material);
@@ -659,6 +755,43 @@ app.get('/api/admin/db-stats', requireAuth, requireVerified, async (req, res) =>
             collections: dbStats.collections,
             objects: dbStats.objects
         });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/telegram-info', (req, res) => {
+    res.json({
+        channelUsername: process.env.TELEGRAM_CHANNEL_USERNAME || '',
+        channelUrl: process.env.TELEGRAM_CHANNEL_USERNAME ? `https://t.me/${process.env.TELEGRAM_CHANNEL_USERNAME}` : '',
+        configured: !!(process.env.TELEGRAM_CHANNEL_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_CHAT_ID)
+    });
+});
+
+app.post('/api/admin/broadcast', requireAuth, requireVerified, broadcastLimiter, async (req, res) => {
+    try {
+        const { text, previewUrl } = req.body;
+        if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Message text required' });
+        if (text.length > 4000) return res.status(400).json({ error: 'Message too long (max 4000 chars)' });
+        const result = await sendTelegramChannel(text, previewUrl);
+        if (result.ok) res.json({ success: true, messageId: result.result?.message_id });
+        else res.status(400).json({ error: result.description || result.error || 'Telegram send failed' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/telegram-preview-material/:id', requireAuth, requireVerified, async (req, res) => {
+    try {
+        const mat = await Material.findById(req.params.id).populate('category', 'name slug').lean();
+        if (!mat) return res.status(404).json({ error: 'Not found' });
+        const b = buildMaterialBroadcast(mat);
+        res.json({ text: b.text, link: b.link });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/telegram-preview-project/:id', requireAuth, requireVerified, async (req, res) => {
+    try {
+        const proj = await Project.findById(req.params.id).lean();
+        if (!proj) return res.status(404).json({ error: 'Not found' });
+        const b = buildProjectBroadcast(proj);
+        res.json({ text: b.text, link: b.link });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
