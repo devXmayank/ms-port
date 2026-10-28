@@ -33,6 +33,7 @@
         else if (n === 'projects') loadProjects();
         else if (n === 'materials') loadMaterials();
         else if (n === 'messages') loadMessages();
+        else if (n === 'broadcast') loadBroadcast();
         else if (n === 'downloads') loadDownloadLogs();
     }
 
@@ -97,7 +98,9 @@
             var list = t.materials || [];
             document.getElementById('materialsBody').innerHTML = list.length
                 ? list.map(function (m) {
-                    return '<tr><td>' + esc(m.title) + '<div style="font-family:var(--font-mono);font-size:10px;color:var(--accent);margin-top:2px">/' + (m.customPath || '—') + '</div></td><td>' + esc(m.category && m.category.name ? m.category.name : '—') + '</td><td><span class="badge badge-gold">' + (m.type || 'note') + '</span></td><td>' + (m.downloads || 0) + '</td><td><button class="btn btn-sm" data-edit="' + m._id + '">Edit</button> <button class="btn btn-sm btn-danger" data-del="' + m._id + '">Del</button></td></tr>';
+                    var isPdf = m.type === 'pdf' && (m.fileUrl || m.fileId);
+                    var viewBtn = isPdf ? '<a class="btn btn-sm" href="/api/materials/id/' + m._id + '/view" target="_blank" rel="noopener" title="Open PDF"><i class="fas fa-eye"></i></a> ' : '';
+                    return '<tr><td>' + esc(m.title) + '<div style="font-family:var(--font-mono);font-size:10px;color:var(--accent);margin-top:2px">/' + (m.customPath || '—') + '</div></td><td>' + esc(m.category && m.category.name ? m.category.name : '—') + '</td><td><span class="badge badge-gold">' + (m.type || 'note') + '</span></td><td>' + (m.downloads || 0) + '</td><td>' + viewBtn + '<button class="btn btn-sm" data-edit="' + m._id + '">Edit</button> <button class="btn btn-sm btn-danger" data-del="' + m._id + '">Del</button></td></tr>';
                 }).join('')
                 : '<tr class="empty-row"><td colspan="5">No materials</td></tr>';
             document.querySelectorAll('#materialsBody [data-edit]').forEach(function (b) { b.addEventListener('click', function () { openModal('material', b.dataset.edit); }); });
@@ -143,6 +146,95 @@
         } catch (e) {}
     }
 
+    function renderMarkdownPreview(text) {
+        var escaped = esc(text);
+        return escaped
+            .replace(/\*([^*\n]+)\*/g, '<strong style="color:var(--accent);font-weight:600">$1</strong>')
+            .replace(/_([^_\n]+)_/g, '<em style="color:var(--text-secondary)">$1</em>')
+            .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">$1</a>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function loadBroadcast() {
+        var ta = document.getElementById('bcText');
+        if (ta && !ta.dataset.bound) {
+            ta.addEventListener('input', function () {
+                var pv = document.getElementById('bcPreview');
+                if (pv) pv.innerHTML = this.value.trim() ? renderMarkdownPreview(this.value) : 'Nothing yet. Type a message above or load a template.';
+            });
+            ta.dataset.bound = '1';
+        }
+        var pb = document.getElementById('bcPreviewBtn');
+        if (pb && !pb.dataset.bound) {
+            pb.addEventListener('click', function () {
+                var v = document.getElementById('bcText').value.trim();
+                document.getElementById('bcPreview').innerHTML = v ? renderMarkdownPreview(v) : 'Nothing to preview.';
+            });
+            pb.dataset.bound = '1';
+        }
+        var cb = document.getElementById('bcClearBtn');
+        if (cb && !cb.dataset.bound) {
+            cb.addEventListener('click', function () {
+                document.getElementById('bcText').value = '';
+                document.getElementById('bcPreview').innerHTML = 'Nothing yet. Type a message above or load a template.';
+                document.getElementById('bcStatus').textContent = '';
+            });
+            cb.dataset.bound = '1';
+        }
+        var sb = document.getElementById('bcSendBtn');
+        if (sb && !sb.dataset.bound) {
+            sb.addEventListener('click', async function () {
+                var text = document.getElementById('bcText').value.trim();
+                if (!text) return toast('Write something first', 'error');
+                if (!confirm('Send this message to your Telegram channel?')) return;
+                var btn = this; var orig = btn.innerHTML;
+                btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+                try {
+                    var preview = (text.match(/https?:\/\/\S+/) || [])[0] || '';
+                    var r = await fetch(A + '/api/admin/broadcast', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, previewUrl: preview }) });
+                    var d = await r.json();
+                    var st = document.getElementById('bcStatus');
+                    if (d.success) { toast('Sent to channel!', 'success'); if (st) st.innerHTML = '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> Sent at ' + new Date().toLocaleTimeString() + ' (message id ' + d.messageId + ')</span>'; }
+                    else { toast(d.error || 'Failed to send', 'error'); if (st) st.innerHTML = '<span style="color:var(--red)"><i class="fas fa-exclamation-circle"></i> ' + esc(d.error || 'Failed') + '</span>'; }
+                } catch (e) { toast('Network error', 'error'); }
+                btn.disabled = false; btn.innerHTML = orig;
+            });
+            sb.dataset.bound = '1';
+        }
+        var lm = document.getElementById('bcLoadMaterialBtn');
+        if (lm && !lm.dataset.bound) {
+            lm.addEventListener('click', async function () {
+                try {
+                    var r = await fetch(A + '/api/materials?limit=1');
+                    var d = await r.json();
+                    var m = (d.materials || [])[0];
+                    if (!m) return toast('No materials yet', 'error');
+                    var p = await (await fetch(A + '/api/admin/telegram-preview-material/' + m._id)).json();
+                    document.getElementById('bcText').value = p.text;
+                    document.getElementById('bcPreview').innerHTML = renderMarkdownPreview(p.text);
+                    document.getElementById('bcStatus').textContent = 'Loaded: ' + m.title;
+                } catch (e) { toast('Failed to load', 'error'); }
+            });
+            lm.dataset.bound = '1';
+        }
+        var lp = document.getElementById('bcLoadProjectBtn');
+        if (lp && !lp.dataset.bound) {
+            lp.addEventListener('click', async function () {
+                try {
+                    var r = await fetch(A + '/api/projects?limit=1');
+                    var d = await r.json();
+                    var p = (d.projects || [])[0];
+                    if (!p) return toast('No projects yet', 'error');
+                    var pv = await (await fetch(A + '/api/admin/telegram-preview-project/' + p._id)).json();
+                    document.getElementById('bcText').value = pv.text;
+                    document.getElementById('bcPreview').innerHTML = renderMarkdownPreview(pv.text);
+                    document.getElementById('bcStatus').textContent = 'Loaded: ' + p.title;
+                } catch (e) { toast('Failed to load', 'error'); }
+            });
+            lp.dataset.bound = '1';
+        }
+    }
+
     function openModal(type, id) {
         editId = id || null;
         var content = document.getElementById('modalContent');
@@ -170,6 +262,7 @@
                 '<div class="form-group"><label>Tech Stack (comma separated)</label><input id="fTechStack" name="techStack" placeholder="HTML, CSS, JavaScript"></div>' +
                 '<div class="form-row"><div class="form-group"><label>Live URL</label><input type="url" id="fLiveUrl" name="liveUrl" placeholder="https://"></div><div class="form-group"><label>GitHub URL</label><input type="url" id="fGithubUrl" name="githubUrl" placeholder="https://"></div></div>' +
                 '<div class="form-group"><label>Thumbnail Image</label><input type="file" id="fThumbnail" name="thumbnail" accept="image/*"></div>' +
+                (id ? '' : '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="fBroadcast" name="broadcast" value="true" checked style="width:auto"> <i class="fab fa-telegram" style="color:var(--accent)"></i> Broadcast to Telegram channel on create</label></div>') +
                 '<div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>' +
                 '</form>';
         } else if (type === 'material') {
@@ -184,6 +277,7 @@
                 '<div class="form-group"><label>File Upload</label><input type="file" id="fFile" name="file"></div>' +
                 '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="fWatermark" name="addWatermark" value="true" checked style="width:auto"> Add C&amp;C Watermark</label></div>' +
                 '<div class="form-group"><label>Or External Link</label><input type="url" id="fExternalLink" name="externalLink" placeholder="https://..."></div>' +
+                (id ? '' : '<div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="fBroadcast" name="broadcast" value="true" checked style="width:auto"> <i class="fab fa-telegram" style="color:var(--accent)"></i> Broadcast to Telegram channel on create</label></div>') +
                 '<div class="form-actions"><button type="button" class="btn" id="mc">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>' +
                 '</form>';
         }
@@ -318,6 +412,8 @@
                 if (gh) fd.append('githubUrl', gh);
                 var thumb = document.getElementById('fThumbnail');
                 if (thumb && thumb.files && thumb.files[0]) fd.append('thumbnail', thumb.files[0]);
+                var bcP = document.getElementById('fBroadcast');
+                if (bcP && bcP.checked) fd.append('broadcast', 'true');
                 var r = await fetch(url, { method: method, body: fd });
                 if (r.ok) { closeModal(); loadProjects(); loadDashboard(); toast('Project saved!', 'success'); }
                 else { var err2 = await r.json(); toast(err2.error || 'Failed', 'error'); }
@@ -345,6 +441,8 @@
                 fd2.append('addWatermark', (wm && wm.checked) || false);
                 var ext = (document.getElementById('fExternalLink') || {}).value ? document.getElementById('fExternalLink').value.trim() : '';
                 if (ext) fd2.append('externalLink', ext);
+                var bcM = document.getElementById('fBroadcast');
+                if (bcM && bcM.checked) fd2.append('broadcast', 'true');
                 var res3 = await fetch(url, { method: method, body: fd2 });
                 if (res3.ok) { closeModal(); loadMaterials(); loadDashboard(); toast('Material saved!', 'success'); }
                 else { var err3 = await res3.json(); toast(err3.error || 'Failed', 'error'); }
