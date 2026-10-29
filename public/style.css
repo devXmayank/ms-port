@@ -665,12 +665,25 @@ textarea {
     border-top: 1px solid var(--border);
 }
 
+.material-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: nowrap;
+    align-items: center;
+}
+
+.material-info {
+    min-width: 0;
+}
+
 .material-info h3 {
     font-family: var(--font-body);
     font-size: 16px;
     font-weight: 500;
     letter-spacing: 0;
     margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .material-info .meta {
@@ -678,6 +691,7 @@ textarea {
     color: var(--text-dim);
     display: flex;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 .material-type-badge {
@@ -687,6 +701,7 @@ textarea {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
+    white-space: nowrap;
 }
 
 .badge-pdf { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
@@ -1098,9 +1113,16 @@ textarea {
         max-width: 100%;
     }
     
+    .hero-title { font-size: clamp(48px, 14vw, 72px); }
+    .hero-description { font-size: 15px; }
+    .hero-actions .btn { width: 100%; justify-content: center; }
+    
     .section {
         padding: 80px 0;
     }
+    .section-header { margin-bottom: 40px; }
+    .section-title { font-size: clamp(32px, 9vw, 44px); }
+    .section-description { font-size: 15px; }
     
     .stats-bar {
         grid-template-columns: 1fr 1fr;
@@ -1114,18 +1136,71 @@ textarea {
         grid-template-columns: 1fr;
     }
     
+    .category-card { padding: 24px; }
+    
     .projects-grid {
         grid-template-columns: 1fr;
     }
     
-    .material-row {
-        grid-template-columns: 1fr;
-        gap: 8px;
-        padding: 20px 0;
-    }
+    .project-body { padding: 20px; }
+    .project-body h3 { font-size: 18px; }
     
+    .btn-lg { padding: 14px 28px; font-size: 13px; }
+    
+    .material-row {
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        padding: 16px 0;
+        align-items: flex-start;
+    }
     .material-row:hover {
         padding-left: 0;
+        border-color: var(--border);
+    }
+    .material-row .material-info {
+        grid-column: 1 / -1;
+        min-width: 0;
+    }
+    .material-row .material-info h3 {
+        font-size: 15px;
+        margin-bottom: 6px;
+        white-space: normal;
+        line-height: 1.35;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .material-row .material-info .meta {
+        font-size: 11px;
+        gap: 8px;
+        line-height: 1.5;
+        flex-wrap: wrap;
+    }
+    .material-row .material-type-badge {
+        grid-column: 1;
+        justify-self: start;
+        font-size: 9px;
+        padding: 3px 8px;
+        white-space: nowrap;
+    }
+    .material-row .material-date {
+        grid-column: 2;
+        justify-self: end;
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+    .material-row .material-actions {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+    }
+    .material-row .material-actions .btn {
+        padding: 8px 12px;
+        font-size: 12px;
+        min-width: 40px;
+        min-height: 40px;
     }
     
     .footer-grid {
@@ -1139,9 +1214,24 @@ textarea {
         text-align: center;
     }
     
+    .footer { padding: 56px 0 32px; }
+    
     .modal {
-        padding: 24px;
-        margin: 20px;
+        max-width: calc(100% - 24px);
+        width: calc(100% - 24px);
+        margin: 0;
+        border-radius: 16px;
+        max-height: 88vh;
+        padding: 24px 20px;
+    }
+    .modal-overlay {
+        padding: 12px;
+        align-items: flex-end;
+    }
+    .modal .btn {
+        padding: 12px 20px;
+        font-size: 12px;
+        min-height: 44px;
     }
 }
 
@@ -1156,8 +1246,9 @@ textarea {
     }
     
     .btn {
-        padding: 12px 24px;
+        padding: 12px 22px;
         font-size: 11px;
+        min-height: 42px;
     }
     
     .filter-bar {
@@ -1165,7 +1256,8 @@ textarea {
     }
     
     .filter-pill {
-        padding: 6px 14px;
-        font-size: 11px;
+        padding: 8px 16px;
+        font-size: 12px;
+        min-height: 36px;
     }
 }

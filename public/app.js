@@ -197,16 +197,15 @@ function renderMaterialRow(m, i) {
     const isPdf = m.type === 'pdf' && (m.fileUrl || m.fileId);
     const hasFile = m.fileUrl || m.fileId;
     const typeLabel = m.type || 'note';
-    const path = m.customPath ? `/${m.customPath}` : `/materials?open=${m.slug}`;
+    const shareId = m.customPath || m.shareableLink || m.slug;
     const updated = m.updatedAt && m.createdAt && (new Date(m.updatedAt).getTime() - new Date(m.createdAt).getTime() > 60000) ? `<span style="color:var(--accent);font-size:11px"><i class="fas fa-sync"></i> Updated ${new Date(m.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>` : '';
     const action = isLink
         ? (m.fileUrl ? `<a class="btn btn-outline btn-sm open-btn" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer" title="Open link"><i class="fas fa-external-link-alt"></i></a>` : '')
         : (isPdf
             ? `<a class="btn btn-outline btn-sm" href="/api/materials/id/${m._id}/view" target="_blank" rel="noopener" title="Open PDF"><i class="fas fa-eye"></i></a><button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}" title="Download"><i class="fas fa-download"></i></button>`
             : (hasFile ? `<button class="btn btn-outline btn-sm dl-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}" title="Download"><i class="fas fa-download"></i></button>` : ''));
-    return `<div class="material-row" data-slug="${m.slug || ''}" data-path="${esc(m.customPath || '')}" data-share="${m.customPath || m.shareableLink || m.slug}" data-title="${esc(m.title)}" style="animation-delay:${i * 0.05}s"><div class="material-info"><h3>${esc(m.title)}</h3><div class="meta"><span>${esc(m.category?.name || 'General')}</span>${m.subject ? `<span>${esc(m.subject)}</span>` : ''}${m.grade ? `<span>Grade ${esc(m.grade)}</span>` : ''}${m.customPath ? `<span style="font-family:var(--font-mono);color:var(--accent)">${path}</span>` : ''}${updated}</div></div><span class="material-type-badge badge-${typeLabel}">${typeLabel}</span><span class="material-date">${new Date(m.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span><div style="display:flex;gap:6px">${action}<button class="btn btn-outline btn-sm share-btn" data-share="${m.customPath || m.shareableLink || m.slug}" data-title="${esc(m.title)}" title="Share"><i class="fas fa-share-alt"></i></button></div></div>`;
+    return `<div class="material-row" data-slug="${m.slug || ''}" data-share="${shareId}" data-title="${esc(m.title)}" style="animation-delay:${i * 0.05}s"><div class="material-info"><h3>${esc(m.title)}</h3><div class="meta"><span>${esc(m.category?.name || 'General')}</span>${m.subject ? `<span>${esc(m.subject)}</span>` : ''}${m.grade ? `<span>Grade ${esc(m.grade)}</span>` : ''}${updated}</div></div><span class="material-type-badge badge-${typeLabel}">${typeLabel}</span><span class="material-date">${new Date(m.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span><div class="material-actions">${action}<button class="btn btn-outline btn-sm share-btn" data-share="${shareId}" data-title="${esc(m.title)}" title="Share"><i class="fas fa-share-alt"></i></button></div></div>`;
 }
-
 function attachMaterialEvents() {
     document.querySelectorAll('#materialsList .material-row, #lm .material-row').forEach(row => { row.addEventListener('click', function(e) { if (e.target.closest('button') || e.target.closest('a')) return; const slug = this.dataset.slug; if (slug && slug !== 'undefined' && slug !== 'null') openMaterialModal(slug); }); });
     document.querySelectorAll('.dl-btn').forEach(b => b.addEventListener('click', function(e) { e.stopPropagation(); downloadMaterial(this.dataset.id, this.dataset.filename); }));
@@ -239,7 +238,7 @@ async function openMaterialModal(slug) {
         if (isLink && m.fileUrl) action = `<a class="btn btn-primary" href="${m.fileUrl}" target="_blank" rel="noopener noreferrer"><i class="fas fa-external-link-alt"></i> Open Link</a>`;
         else if (isPdf) action = `<a class="btn btn-primary" href="/api/materials/id/${m._id}/view" target="_blank" rel="noopener"><i class="fas fa-eye"></i> Open PDF</a><button class="btn btn-outline md-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}"><i class="fas fa-download"></i> Download</button>`;
         else if (m.fileUrl || m.fileId) action = `<button class="btn btn-primary md-btn" data-id="${m._id}" data-filename="${esc(m.fileName || 'download')}"><i class="fas fa-download"></i> Download</button>`;
-        overlay.innerHTML = `<div class="modal"><button class="modal-close">&times;</button><span class="material-type-badge badge-${m.type || 'note'}" style="margin-bottom:16px;display:inline-block">${m.type || 'note'}</span><h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:12px">${esc(m.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(m.description)}</p><div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--text-secondary)">${m.category ? `<span><strong>Category:</strong> ${esc(m.category.name)}</span>` : ''}${m.subject ? `<span><strong>Subject:</strong> ${esc(m.subject)}</span>` : ''}${m.grade ? `<span><strong>Grade:</strong> ${esc(m.grade)}</span>` : ''}</div>${m.customPath ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-bottom:14px">Path: <strong>/${esc(m.customPath)}</strong></div>` : ''}<div style="display:flex;gap:12px;margin-bottom:16px;font-size:11px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${m.views || 0}</span><span><i class="fas fa-download"></i> ${m.downloads || 0}</span><span>${new Date(m.createdAt).toLocaleDateString()}</span>${updatedBadge}</div><div style="display:flex;gap:10px;flex-wrap:wrap">${action}<button class="btn btn-outline modal-share-btn" data-share="${esc(sharePath)}" data-title="${esc(m.title)}"><i class="fas fa-share-alt"></i> Share</button><button class="btn btn-outline mc-btn">Close</button></div></div>`;
+        overlay.innerHTML = `<div class="modal"><button class="modal-close">&times;</button><span class="material-type-badge badge-${m.type || 'note'}" style="margin-bottom:16px;display:inline-block">${m.type || 'note'}</span><h2 style="font-family:var(--font-display);font-size:26px;margin-bottom:12px">${esc(m.title)}</h2><p style="color:var(--text-secondary);margin-bottom:20px;line-height:1.7">${esc(m.description)}</p><div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--text-secondary)">${m.category ? `<span><strong>Category:</strong> ${esc(m.category.name)}</span>` : ''}${m.subject ? `<span><strong>Subject:</strong> ${esc(m.subject)}</span>` : ''}${m.grade ? `<span><strong>Grade:</strong> ${esc(m.grade)}</span>` : ''}</div>${m.customPath ? `<div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-bottom:14px">Path: <strong>/s/${esc(m.customPath)}</strong></div>` : ''}<div style="display:flex;gap:12px;margin-bottom:16px;font-size:11px;color:var(--text-dim)"><span><i class="fas fa-eye"></i> ${m.views || 0}</span><span><i class="fas fa-download"></i> ${m.downloads || 0}</span><span>${new Date(m.createdAt).toLocaleDateString()}</span>${updatedBadge}</div><div style="display:flex;gap:10px;flex-wrap:wrap">${action}<button class="btn btn-outline modal-share-btn" data-share="${esc(sharePath)}" data-title="${esc(m.title)}"><i class="fas fa-share-alt"></i> Share</button><button class="btn btn-outline mc-btn">Close</button></div></div>`;
         document.body.appendChild(overlay); document.body.style.overflow = 'hidden';
         const close = () => { overlay.remove(); document.body.style.overflow = ''; };
         overlay.querySelector('.modal-close').addEventListener('click', close); overlay.querySelector('.mc-btn').addEventListener('click', close);
@@ -321,8 +320,9 @@ function showDownloadToast(msg) {
     t._h = setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(20px)'; }, 3000);
 }
 
-function showShareSheet(sharePath, title) {
-    const fullUrl = `${window.location.origin}${sharePath.startsWith('/') ? sharePath : '/' + sharePath}`;
+function showShareSheet(shareId, title) {
+    const id = String(shareId || '').replace(/^\/s\//, '').replace(/^\//, '');
+    const fullUrl = `${window.location.origin}/s/${id}`;
     if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
         navigator.share({ title: title || 'Study material', text: title || 'Check this out on CODE & CLASSROOM', url: fullUrl })
             .then(() => showDownloadToast('Shared!'))
@@ -365,7 +365,6 @@ function showShareSheet(sharePath, title) {
     document.addEventListener('keydown', function esc3(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc3); } });
 }
 
-
 function initTelegramPopup() {
     if (localStorage.getItem('telegram-popup-dismissed') === '1') return;
     fetch('/api/admin/telegram-info').then(r => r.json()).then(info => {
@@ -386,6 +385,24 @@ function initTelegramPopup() {
         });
     }).catch(() => {});
 }
+
+function sendVisitLog() {
+    try {
+        if (sessionStorage.getItem('visit-logged') === '1') return;
+        sessionStorage.setItem('visit-logged', '1');
+        const payload = {
+            path: location.pathname + location.search,
+            referrer: document.referrer || '',
+            lang: navigator.language || '',
+            tz: (Intl.DateTimeFormat().resolvedOptions().timeZone) || '',
+            screen: (window.screen.width || 0) + 'x' + (window.screen.height || 0),
+            platform: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || ''
+        };
+        fetch('/api/logs/visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(() => {});
+    } catch (e) {}
+}
+if (document.readyState === 'complete') sendVisitLog();
+else window.addEventListener('load', sendVisitLog);
 
 
 function showToast(msg, type = 'info') { const existing = document.querySelector('.toast'); if (existing) existing.remove(); const toast = document.createElement('div'); toast.className = `toast toast-${type}`; toast.textContent = msg; document.body.appendChild(toast); setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'all 0.3s'; setTimeout(() => toast.remove(), 300); }, 3000); }
