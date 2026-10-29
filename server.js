@@ -37,10 +37,11 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
             imgSrc: ["'self'", "data:", "blob:", "https:", "https://res.cloudinary.com", "https://i.postimg.cc"],
-            connectSrc: ["'self'", "https://accounts.google.com", "https://generativelanguage.googleapis.com", "https://api.groq.com"],
+            connectSrc: ["'self'", "https://accounts.google.com", "https://generativelanguage.googleapis.com", "https://api.groq.com", "blob:"],
             frameSrc: ["'self'", "https://accounts.google.com", "https://www.instagram.com"],
             formAction: ["'self'", "https://www.instagram.com"],
-            mediaSrc: ["'self'"],
+            mediaSrc: ["'self'", "blob:"],
+            workerSrc: ["'self'", "blob:"],
             scriptSrcAttr: ["'unsafe-inline'"]
         }
     },
@@ -62,6 +63,8 @@ const contactLimiter = rateLimit({ windowMs: 24 * 60 * 60 * 1000, max: 1, keyGen
 const chatLimiter = rateLimit({ windowMs: 60 * 1000, max: 15, keyGenerator: (req) => req.ip, message: { reply: 'Slow down a bit — please wait before sending more messages.' } });
 const authLimiter = rateLimit({ windowMs: 900000, max: 10, message: { error: 'Too many attempts' } });
 const broadcastLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, keyGenerator: (req) => req.ip, message: { error: 'Too many broadcasts. Wait a minute.' } });
+const visitLogLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, keyGenerator: (req) => req.ip, message: { error: 'Too many requests.' } });
+const adminLogsLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, keyGenerator: (req) => req.ip, message: { error: 'Too many requests.' } });
 
 const adminSchema = new mongoose.Schema({ googleId: { type: String, unique: true, sparse: true }, email: { type: String, required: true, unique: true, lowercase: true }, verifiedAt: Date, lastLogin: Date, createdAt: { type: Date, default: Date.now } });
 const Admin = mongoose.model('Admin', adminSchema);
@@ -116,11 +119,117 @@ const Message = mongoose.model('Message', messageSchema);
 const downloadLogSchema = new mongoose.Schema({ material: { type: mongoose.Schema.Types.ObjectId, ref: 'Material' }, ip: String, userAgent: String, timestamp: { type: Date, default: Date.now } });
 const DownloadLog = mongoose.model('DownloadLog', downloadLogSchema);
 
+const logSchema = new mongoose.Schema({
+    type: { type: String, enum: ['visit', 'download', 'pdf_view', 'login', 'admin_action'], required: true },
+    ipHash: { type: String, required: true },
+    ipEnc: { type: String, required: true },
+    ua: String,
+    os: String,
+    browser: String,
+    device: String,
+    lang: String,
+    tz: String,
+    screen: String,
+    path: String,
+    referrer: String,
+    materialId: { type: mongoose.Schema.Types.ObjectId, ref: 'Material' },
+    meta: mongoose.Schema.Types.Mixed,
+    isLocalhost: { type: Boolean, default: false },
+    dedupeKey: { type: String, required: true, unique: true },
+    createdAt: { type: Date, default: Date.now },
+    ttlAt: { type: Date, required: true }
+});
+logSchema.index({ ttlAt: 1 }, { expireAfterSeconds: 0 });
+logSchema.index({ type: 1, createdAt: -1 });
+logSchema.index({ isLocalhost: 1, createdAt: -1 });
+const Log = mongoose.model('Log', logSchema);
+
+const LOG_SALT = process.env.LOG_SALT || 'change-me-in-env-file-please-use-random';
+const LOG_ENC_KEY = process.env.LOG_ENC_KEY && process.env.LOG_ENC_KEY.length === 64 ? Buffer.from(process.env.LOG_ENC_KEY, 'hex') : crypto.createHash('sha256').update(LOG_SALT + '::enc').digest();
+
+function hashIP(ip) { return crypto.createHash('sha256').update(String(ip) + '::' + LOG_SALT).digest('hex'); }
+function encryptIP(ip) {
+    try {
+        const iv = crypto.randomBytes(12);
+        const cipher = crypto.createCipheriv('aes-256-gcm', LOG_ENC_KEY, iv);
+        const enc = Buffer.concat([cipher.update(String(ip), 'utf8'), cipher.final()]);
+        const tag = cipher.getAuthTag();
+        return iv.toString('hex') + ':' + tag.toString('hex') + ':' + enc.toString('hex');
+    } catch (e) { return ''; }
+}
+function decryptIP(payload) {
+    try {
+        if (!payload) return '';
+        const [ivHex, tagHex, encHex] = String(payload).split(':');
+        if (!ivHex || !tagHex || !encHex) return '';
+        const decipher = crypto.createDecipheriv('aes-256-gcm', LOG_ENC_KEY, Buffer.from(ivHex, 'hex'));
+        decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+        return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString('utf8');
+    } catch (e) { return ''; }
+}
+function parseUA(ua) {
+    const s = String(ua || '');
+    let os = 'Unknown';
+    if (/Windows NT 10/.test(s)) os = 'Windows 10/11';
+    else if (/Windows NT 6\.3/.test(s)) os = 'Windows 8.1';
+    else if (/Windows NT 6\.1/.test(s)) os = 'Windows 7';
+    else if (/Mac OS X/.test(s)) os = 'macOS';
+    else if (/Android/.test(s)) { const m = s.match(/Android\s([\d.]+)/); os = 'Android' + (m ? ' ' + m[1] : ''); }
+    else if (/iPhone|iPad|iPod/.test(s)) { const m = s.match(/OS\s([\d_]+)/); os = 'iOS' + (m ? ' ' + m[1].replace(/_/g, '.') : ''); }
+    else if (/Linux/.test(s)) os = 'Linux';
+    let browser = 'Unknown';
+    if (/Edg\//.test(s)) browser = 'Edge';
+    else if (/OPR\/|Opera/.test(s)) browser = 'Opera';
+    else if (/Chrome\//.test(s) && !/Edg\//.test(s)) { const m = s.match(/Chrome\/([\d]+)/); browser = 'Chrome' + (m ? ' ' + m[1] : ''); }
+    else if (/Firefox\//.test(s)) { const m = s.match(/Firefox\/([\d]+)/); browser = 'Firefox' + (m ? ' ' + m[1] : ''); }
+    else if (/Safari\//.test(s) && !/Chrome/.test(s)) { const m = s.match(/Version\/([\d.]+)/); browser = 'Safari' + (m ? ' ' + m[1] : ''); }
+    let device = 'Desktop';
+    if (/iPad|Tablet/i.test(s)) device = 'Tablet';
+    else if (/Mobile|iPhone|Android.*Mobile/i.test(s)) device = 'Mobile';
+    return { os, browser, device };
+}
+function isLocalhostIP(ip) { const s = String(ip || ''); return s === '127.0.0.1' || s === '::1' || s === 'localhost' || s.startsWith('192.168.') || s.startsWith('10.') || s.startsWith('::ffff:127.') || s.startsWith('::ffff:192.168.'); }
+
+async function writeLog(req, type, extra) {
+    try {
+        const ipRaw = (req.ip || req.connection.remoteAddress || '').replace(/^::ffff:/, '');
+        if (!ipRaw) return;
+        const ua = req.headers['user-agent'] || '';
+        const parsed = parseUA(ua);
+        const hourBucket = Math.floor(Date.now() / 3600000);
+        const materialIdStr = extra && extra.materialId ? String(extra.materialId) : '';
+        const dedupeKey = hashIP(ipRaw + '::' + type + '::' + materialIdStr + '::' + hourBucket);
+        const ttlAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+        await Log.create({
+            type,
+            ipHash: hashIP(ipRaw),
+            ipEnc: encryptIP(ipRaw),
+            ua,
+            os: parsed.os,
+            browser: parsed.browser,
+            device: parsed.device,
+            lang: (extra && extra.lang) || '',
+            tz: (extra && extra.tz) || '',
+            screen: (extra && extra.screen) || '',
+            path: (extra && extra.path) || '',
+            referrer: (extra && extra.referrer) || '',
+            materialId: materialIdStr && mongoose.isValidObjectId(materialIdStr) ? materialIdStr : undefined,
+            meta: (extra && extra.meta) || {},
+            isLocalhost: isLocalhostIP(ipRaw),
+            dedupeKey,
+            ttlAt
+        });
+    } catch (err) {
+        if (err && err.code !== 11000) console.error('Log write failed:', err.message);
+    }
+}
+
 let gfs;
 mongoose.connection.once('open', () => {
     gfs = new GridFSBucket(mongoose.connection.db, { bucketName: 'materials' });
     mongoose.connection.db.collection('materials.chunks').createIndex({ files_id: 1, n: 1 }).catch(() => {});
     console.log('GridFS ready');
+    Log.init().then(() => console.log('Log indexes ready')).catch(() => {});
 });
 
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/portfolio')
@@ -174,7 +283,8 @@ function mdEscape(s) { return String(s || '').replace(/([_*\[\]()~`>#+\-=|{}.!])
 
 function buildMaterialBroadcast(mat) {
     const base = 'https://mayanksagar.onrender.com';
-    const link = `${base}/${mat.customPath || 'materials?open=' + mat.slug}`;
+    const shareId = mat.shareableLink || mat.customPath || mat.slug;
+    const link = `${base}/s/${shareId}`;
     const type = (mat.examType || mat.type || 'resource').replace('-', ' ');
     const cat = mat.category && mat.category.name ? mat.category.name : '';
     let msg = `📚 *New Material Added*\n\n`;
@@ -189,7 +299,7 @@ function buildMaterialBroadcast(mat) {
 
 function buildProjectBroadcast(project) {
     const base = 'https://mayanksagar.onrender.com';
-    const link = `${base}/projects`;
+    const link = `${base}/s/${project.shareableLink || project.slug}`;
     let msg = `🚀 *New Project Launched*\n\n`;
     msg += `*${mdEscape(project.title)}*\n`;
     msg += `📊 Status: ${mdEscape(project.status || 'planning')}\n`;
@@ -197,13 +307,21 @@ function buildProjectBroadcast(project) {
     msg += `\n${mdEscape((project.description || '').slice(0, 200))}\n\n`;
     if (project.liveUrl) msg += `🌐 [Live Demo](${project.liveUrl})\n`;
     if (project.githubUrl) msg += `💻 [Source Code](${project.githubUrl})\n`;
-    msg += `\n🔗 [View all projects](${link})\n\n`;
+    msg += `\n🔗 [View Project](${link})\n\n`;
     msg += `_via CODE & CLASSROOM_`;
     return { text: msg, link };
 }
 
+app.post('/api/logs/visit', visitLogLimiter, async (req, res) => {
+    try {
+        const b = req.body || {};
+        await writeLog(req, 'visit', { path: b.path || req.headers.referer || '/', referrer: b.referrer || '', lang: b.lang || '', tz: b.tz || '', screen: b.screen || '', meta: { platform: b.platform || '' } });
+        res.json({ ok: true });
+    } catch (e) { res.json({ ok: true }); }
+});
+
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account' }));
-app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login?error=1' }), (req, res) => res.redirect('/admin-verify'));
+app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login?error=1' }), async (req, res) => { await writeLog(req, 'login', { path: '/auth/google/callback' }); res.redirect('/admin-verify'); });
 app.post('/auth/verify', authLimiter, async (req, res) => {
     if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
     const valid = await bcrypt.compare(req.body.password, process.env.ADMIN_PASSWORD_HASH || '');
@@ -304,11 +422,25 @@ app.get('/api/materials/id/:id/view', async (req, res) => {
     try {
         const material = await Material.findById(req.params.id).populate('category', 'name slug').lean();
         if (!material) return res.status(404).send('Not found');
+        await writeLog(req, 'pdf_view', { materialId: material._id, path: '/api/materials/id/' + material._id + '/view' });
         const rawUrl = `/api/materials/id/${material._id}/raw`;
         const dlUrl = `/api/materials/id/${material._id}/download`;
         const title = htmlEscape(material.title || 'Study Material');
         const desc = htmlEscape((material.description || '').slice(0, 180));
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${title} — CODE & CLASSROOM</title><meta name="description" content="${desc}"><meta property="og:title" content="${title} — CODE & CLASSROOM"><meta property="og:description" content="${desc}"><meta property="og:type" content="article"><meta property="og:image" content="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="icon" type="image/x-icon" href="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"><style>:root{--bg:#0d0c0f;--bg-elevated:#141317;--bg-card:#1a191e;--text:#e8e4dd;--text-secondary:#8a8780;--text-dim:#5c5954;--accent:#c9a668;--border:rgba(255,255,255,0.06);--radius:12px;--radius-full:100px;--font-display:'Fraunces',Georgia,serif;--font-body:'Inter',sans-serif}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;display:flex;flex-direction:column}.topbar{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(13,12,15,0.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;transform:translateY(0);transition:transform .35s cubic-bezier(0.19,1,0.22,1),box-shadow .3s}.topbar.hidden{transform:translateY(-100%);box-shadow:none}.topbar.pinned{transform:translateY(0)!important}.hotzone{position:fixed;top:0;left:0;right:0;height:24px;z-index:11;pointer-events:auto}.back{color:var(--text-secondary);text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:var(--radius-full);transition:all .2s;background:none;border:none;cursor:pointer;font-family:var(--font-body)}.back:hover{color:var(--accent);background:rgba(201,166,104,0.1)}.title{flex:1;min-width:200px;font-family:var(--font-display);font-size:16px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:var(--radius-full);font-family:var(--font-body);font-size:12px;font-weight:600;text-decoration:none;transition:all .2s;cursor:pointer;border:none;letter-spacing:0.03em}.btn-primary{background:linear-gradient(135deg,#c9a668,#e8d5a3,#c9a668);color:#0d0c0f}.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(201,166,104,0.3)}.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-outline:hover{border-color:var(--accent);color:var(--accent)}.btn-sm{padding:7px 12px;font-size:11px}.pin-btn{padding:7px 10px!important}.pin-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(201,166,104,0.1)}.frame-wrap{position:fixed;inset:0;background:#0a0a0c;z-index:1}.frame-wrap iframe{width:100%;height:100%;border:none;display:block}.loader{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--bg);z-index:2;transition:opacity .4s}.loader.hidden{opacity:0;pointer-events:none}.spinner{width:48px;height:48px;border:3px solid rgba(201,166,104,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loader-text{font-size:15px;color:var(--text-secondary);text-align:center;padding:0 20px}.loader-text strong{color:var(--accent);display:block;margin-bottom:6px;font-family:var(--font-display);font-size:18px;font-weight:400}.loader-sub{font-size:12px;color:var(--text-dim);margin-top:8px}.error{display:none;flex-direction:column;align-items:center;gap:16px;padding:40px 20px;text-align:center;color:var(--text-secondary);position:fixed;inset:0;background:var(--bg);z-index:2}.error i{font-size:40px;color:#ef4444}.error.show{display:flex}.hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(20,19,23,0.95);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;padding:6px 14px;border-radius:20px;z-index:5;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}.hint.show{opacity:1}@media(max-width:600px){.title{font-size:14px;width:100%;order:3;flex-basis:100%}.topbar{padding:12px 14px}.btn{padding:8px 14px;font-size:11px}.hint{font-size:10px;padding:5px 12px}}</style></head><body><div class="hotzone" id="hot"></div><div class="topbar" id="top"><a href="/materials" class="back"><i class="fas fa-arrow-left"></i> Back</a><div class="title">${title}</div><button class="btn btn-outline btn-sm pin-btn" id="pinBtn" title="Pin bar"><i class="fas fa-thumbtack"></i></button><a href="${dlUrl}" class="btn btn-primary"><i class="fas fa-download"></i> Download</a></div><div class="frame-wrap"><iframe id="pdfFrame" src="${rawUrl}" title="${title}" allow="fullscreen"></iframe></div><div class="loader" id="ldr"><div class="spinner"></div><div class="loader-text"><strong>Loading your file…</strong>Please wait a moment</div><div class="loader-sub">Large files may take a few seconds</div></div><div class="error" id="err"><i class="fas fa-exclamation-triangle"></i><div><strong>Could not load preview</strong><div class="loader-sub">Your browser may not support inline PDFs. Please use the Download button above.</div></div></div><div class="hint" id="hint"></div><script>(function(){var top=document.getElementById('top'),hot=document.getElementById('hot'),pinBtn=document.getElementById('pinBtn'),hint=document.getElementById('hint'),f=document.getElementById('pdfFrame'),ldr=document.getElementById('ldr'),err=document.getElementById('err');var pinned=false,hideTimer=null,hintTimer=null,done=false;function showBar(){top.classList.remove('hidden');}function hideBar(){if(pinned)return;top.classList.add('hidden');}function scheduleHide(){clearTimeout(hideTimer);hideTimer=setTimeout(hideBar,3000);}function showHint(msg){if(!msg)return;hint.textContent=msg;hint.classList.add('show');clearTimeout(hintTimer);hintTimer=setTimeout(function(){hint.classList.remove('show');},2600);}pinBtn.addEventListener('click',function(){pinned=!pinned;pinBtn.classList.toggle('active',pinned);top.classList.toggle('pinned',pinned);if(pinned){showBar();pinBtn.innerHTML='<i class="fas fa-thumbtack"></i>';showHint('Bar fixed — tap pin again to unpin');}else{pinBtn.innerHTML='<i class="fas fa-thumbtack"></i>';scheduleHide();showHint('Bar auto-hides — move mouse to top to show again');}});hot.addEventListener('mouseenter',function(){showBar();clearTimeout(hideTimer);});hot.addEventListener('mousemove',function(){showBar();clearTimeout(hideTimer);});document.addEventListener('mousemove',function(e){if(e.clientY<60){showBar();clearTimeout(hideTimer);}});top.addEventListener('mouseenter',function(){clearTimeout(hideTimer);});top.addEventListener('mouseleave',function(){if(!pinned)scheduleHide();});document.addEventListener('touchstart',function(e){if(e.touches[0]&&e.touches[0].clientY<60){showBar();clearTimeout(hideTimer);scheduleHide();}},{passive:true});function hideLoader(){if(done)return;done=true;ldr.classList.add('hidden');showHint('Bar auto-hides — move mouse to top to show again');scheduleHide();}f.addEventListener('load',hideLoader);f.addEventListener('readystatechange',function(){try{if(f.contentDocument&&f.contentDocument.readyState==='complete')hideLoader();}catch(e){}});setTimeout(hideLoader,12000);f.addEventListener('error',function(){ldr.classList.add('hidden');err.classList.add('show');showBar();});window.addEventListener('keydown',function(e){if(e.key==='h'||e.key==='H'){if(pinned)return;if(top.classList.contains('hidden')){showBar();scheduleHide();}else{hideBar();}}});})();</script></body></html>`;
+        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(req.headers['user-agent'] || '');
+        const pdfjsUrl = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs`;
+        const pdfjsWorkerUrl = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs`;
+        const baseStyles = `:root{--bg:#0d0c0f;--bg-elevated:#141317;--bg-card:#1a191e;--text:#e8e4dd;--text-secondary:#8a8780;--text-dim:#5c5954;--accent:#c9a668;--border:rgba(255,255,255,0.06);--radius:12px;--radius-full:100px;--font-display:'Fraunces',Georgia,serif;--font-body:'Inter',sans-serif}*{margin:0;padding:0;box-sizing:border-box}body{background:var(--bg);color:var(--text);font-family:var(--font-body);min-height:100vh;display:flex;flex-direction:column}.topbar{position:fixed;top:0;left:0;right:0;z-index:10;background:rgba(13,12,15,0.95);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;transform:translateY(0);transition:transform .35s cubic-bezier(0.19,1,0.22,1),box-shadow .3s}.topbar.hidden{transform:translateY(-100%);box-shadow:none}.topbar.pinned{transform:translateY(0)!important}.hotzone{position:fixed;top:0;left:0;right:0;height:24px;z-index:11;pointer-events:auto}.back{color:var(--text-secondary);text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:var(--radius-full);transition:all .2s;background:none;border:none;cursor:pointer;font-family:var(--font-body)}.back:hover{color:var(--accent);background:rgba(201,166,104,0.1)}.title{flex:1;min-width:200px;font-family:var(--font-display);font-size:16px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:var(--radius-full);font-family:var(--font-body);font-size:12px;font-weight:600;text-decoration:none;transition:all .2s;cursor:pointer;border:none;letter-spacing:0.03em}.btn-primary{background:linear-gradient(135deg,#c9a668,#e8d5a3,#c9a668);color:#0d0c0f}.btn-primary:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(201,166,104,0.3)}.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}.btn-outline:hover{border-color:var(--accent);color:var(--accent)}.btn-sm{padding:7px 12px;font-size:11px}.pin-btn{padding:7px 10px!important}.pin-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(201,166,104,0.1)}.frame-wrap{position:fixed;inset:0;background:#0a0a0c;z-index:1}.frame-wrap iframe{width:100%;height:100%;border:none;display:block}.loader{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;background:var(--bg);z-index:2;transition:opacity .4s}.loader.hidden{opacity:0;pointer-events:none}.spinner{width:48px;height:48px;border:3px solid rgba(201,166,104,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loader-text{font-size:15px;color:var(--text-secondary);text-align:center;padding:0 20px}.loader-text strong{color:var(--accent);display:block;margin-bottom:6px;font-family:var(--font-display);font-size:18px;font-weight:400}.loader-sub{font-size:12px;color:var(--text-dim);margin-top:8px}.error{display:none;flex-direction:column;align-items:center;gap:16px;padding:40px 20px;text-align:center;color:var(--text-secondary);position:fixed;inset:0;background:var(--bg);z-index:2}.error i{font-size:40px;color:#ef4444}.error.show{display:flex}.hint{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(20,19,23,0.95);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;padding:6px 14px;border-radius:20px;z-index:5;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}.hint.show{opacity:1}@media(max-width:600px){.title{font-size:14px;width:100%;order:3;flex-basis:100%}.topbar{padding:12px 14px}.btn{padding:8px 14px;font-size:11px}.hint{font-size:10px;padding:5px 12px}}`;
+        const pdfjsStyles = `#pdfContainer{position:fixed;inset:0;top:0;overflow-y:auto;background:#232323;padding:56px 0 24px;-webkit-overflow-scrolling:touch}#pdfContainer canvas{display:block;margin:0 auto 12px;max-width:100%;height:auto;box-shadow:0 2px 12px rgba(0,0,0,0.4);background:#fff}#pdfContainer .pageNum{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-family:var(--font-body)}@media(max-width:600px){#pdfContainer{padding:52px 0 16px}#pdfContainer canvas{margin-bottom:6px}}`;
+        const topbarHtml = `<div class="hotzone" id="hot"></div><div class="topbar" id="top"><a href="/materials" class="back"><i class="fas fa-arrow-left"></i> Back</a><div class="title">${title}</div><button class="btn btn-outline btn-sm pin-btn" id="pinBtn" title="Pin bar"><i class="fas fa-thumbtack"></i></button><a href="${dlUrl}" class="btn btn-primary"><i class="fas fa-download"></i> Download</a></div>`;
+        const loaderHtml = `<div class="loader" id="ldr"><div class="spinner"></div><div class="loader-text"><strong>Loading your file…</strong>Please wait a moment</div><div class="loader-sub">Large files may take a few seconds</div></div><div class="error" id="err"><i class="fas fa-exclamation-triangle"></i><div><strong>Could not load preview</strong><div class="loader-sub">Your browser may not support inline PDFs. Please use the Download button above.</div></div></div><div class="hint" id="hint"></div>`;
+        const sharedScript = `(function(){var top=document.getElementById('top'),hot=document.getElementById('hot'),pinBtn=document.getElementById('pinBtn'),hint=document.getElementById('hint'),ldr=document.getElementById('ldr'),err=document.getElementById('err');var pinned=false,hideTimer=null,hintTimer=null,done=false;function showBar(){top.classList.remove('hidden');}function hideBar(){if(pinned)return;top.classList.add('hidden');}function scheduleHide(){clearTimeout(hideTimer);hideTimer=setTimeout(hideBar,3000);}function showHint(msg){if(!msg)return;hint.textContent=msg;hint.classList.add('show');clearTimeout(hintTimer);hintTimer=setTimeout(function(){hint.classList.remove('show');},2600);}pinBtn.addEventListener('click',function(){pinned=!pinned;pinBtn.classList.toggle('active',pinned);top.classList.toggle('pinned',pinned);if(pinned){showBar();showHint('Bar fixed — tap pin again to unpin');}else{scheduleHide();showHint('Bar auto-hides — tap top to show again');}});hot.addEventListener('mouseenter',function(){showBar();clearTimeout(hideTimer);});hot.addEventListener('mousemove',function(){showBar();clearTimeout(hideTimer);});document.addEventListener('mousemove',function(e){if(e.clientY<60){showBar();clearTimeout(hideTimer);}});top.addEventListener('mouseenter',function(){clearTimeout(hideTimer);});top.addEventListener('mouseleave',function(){if(!pinned)scheduleHide();});document.addEventListener('touchstart',function(e){if(e.touches[0]&&e.touches[0].clientY<60){showBar();clearTimeout(hideTimer);scheduleHide();}},{passive:true});function hideLoader(){if(done)return;done=true;ldr.classList.add('hidden');showHint('Bar auto-hides — tap top to show again');scheduleHide();}window.hideLoader=hideLoader;window.showBar=showBar;window.scheduleHide=scheduleHide;window.showHint=showHint;window.addEventListener('keydown',function(e){if(e.key==='h'||e.key==='H'){if(pinned)return;if(top.classList.contains('hidden')){showBar();scheduleHide();}else{hideBar();}}});})();`;
+        if (isMobile) {
+            const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=5.0,user-scalable=yes"><title>${title} — CODE & CLASSROOM</title><meta name="description" content="${desc}"><meta property="og:title" content="${title} — CODE & CLASSROOM"><meta property="og:description" content="${desc}"><meta property="og:type" content="article"><meta property="og:image" content="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="icon" type="image/x-icon" href="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"><style>${baseStyles}${pdfjsStyles}</style></head><body>${topbarHtml}<div id="pdfContainer"></div>${loaderHtml}<script type="module">import * as pdfjsLib from '${pdfjsUrl}';pdfjsLib.GlobalWorkerOptions.workerSrc='${pdfjsWorkerUrl}';(async function(){try{var pdf=await pdfjsLib.getDocument({url:'${rawUrl}'}).promise;var container=document.getElementById('pdfContainer');var dpr=window.devicePixelRatio||1;for(var i=1;i<=pdf.numPages;i++){var page=await pdf.getPage(i);var baseViewport=page.getViewport({scale:1});var cssWidth=Math.min(window.innerWidth,baseViewport.width*1.5);var scale=cssWidth/baseViewport.width;var viewport=page.getViewport({scale:scale*dpr});var canvas=document.createElement('canvas');canvas.width=viewport.width;canvas.height=viewport.height;canvas.style.width=(viewport.width/dpr)+'px';canvas.style.height=(viewport.height/dpr)+'px';container.appendChild(canvas);var ctx=canvas.getContext('2d');await page.render({canvasContext:ctx,viewport:viewport}).promise;var lbl=document.createElement('div');lbl.className='pageNum';lbl.textContent=i+' / '+pdf.numPages;container.appendChild(lbl);}window.hideLoader();}catch(e){window.hideLoader();document.getElementById('err').classList.add('show');}})();</script><script>${sharedScript}</script></body></html>`;
+            res.set('Content-Type', 'text/html; charset=utf-8');
+            return res.send(html);
+        }
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${title} — CODE & CLASSROOM</title><meta name="description" content="${desc}"><meta property="og:title" content="${title} — CODE & CLASSROOM"><meta property="og:description" content="${desc}"><meta property="og:type" content="article"><meta property="og:image" content="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="icon" type="image/x-icon" href="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"><style>${baseStyles}</style></head><body>${topbarHtml}<div class="frame-wrap"><iframe id="pdfFrame" src="${rawUrl}" title="${title}" allow="fullscreen"></iframe></div>${loaderHtml}<script>${sharedScript}(function(){var f=document.getElementById('pdfFrame');f.addEventListener('load',window.hideLoader);f.addEventListener('readystatechange',function(){try{if(f.contentDocument&&f.contentDocument.readyState==='complete')window.hideLoader();}catch(e){}});setTimeout(window.hideLoader,12000);f.addEventListener('error',function(){document.getElementById('ldr').classList.add('hidden');document.getElementById('err').classList.add('show');window.showBar();});})();</script></body></html>`;
         res.set('Content-Type', 'text/html; charset=utf-8');
         res.send(html);
     } catch (err) { res.status(500).send('Error'); }
@@ -319,28 +451,41 @@ app.get('/api/materials/id/:id/raw', async (req, res) => {
         const material = await Material.findById(req.params.id);
         if (!material) return res.status(404).send('Not found');
         const safeName = (material.fileName || 'document.pdf').replace(/[^\w.\-]/g, '_');
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Accept-Ranges', 'bytes');
         if (material.storage === 'mongo' && material.fileId && gfs) {
             try {
-                res.setHeader('Content-Type', 'application/pdf');
-                res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-                res.setHeader('Cache-Control', 'private, max-age=3600');
-                const chunks = mongoose.connection.db.collection('materials.chunks');
-                const cursor = chunks.find({ files_id: new mongoose.Types.ObjectId(material.fileId) }).sort({ n: 1 }).allowDiskUse();
-                for await (const chunk of cursor) { res.write(chunk.data.buffer); }
-                res.end();
-                return;
+                const fileDoc = await mongoose.connection.db.collection('materials.files').findOne({ _id: new mongoose.Types.ObjectId(material.fileId) });
+                const totalLen = fileDoc && fileDoc.length ? fileDoc.length : (material.fileSize || 0);
+                if (totalLen) res.setHeader('Content-Length', totalLen);
+                const range = req.headers.range;
+                if (range && totalLen) {
+                    const parts = range.replace(/bytes=/, '').split('-');
+                    const start = parseInt(parts[0], 10) || 0;
+                    const end = parts[1] ? parseInt(parts[1], 10) : totalLen - 1;
+                    if (start >= totalLen) { res.status(416).setHeader('Content-Range', `bytes */${totalLen}`); return res.end(); }
+                    res.status(206);
+                    res.setHeader('Content-Range', `bytes ${start}-${end}/${totalLen}`);
+                    res.setHeader('Content-Length', end - start + 1);
+                    const stream = gfs.openDownloadStream(new mongoose.Types.ObjectId(material.fileId), { start, end: end + 1 });
+                    stream.on('error', () => { try { res.end(); } catch (e) {} });
+                    return stream.pipe(res);
+                }
+                const stream = gfs.openDownloadStream(new mongoose.Types.ObjectId(material.fileId));
+                stream.on('error', () => { try { res.end(); } catch (e) {} });
+                return stream.pipe(res);
             } catch (gridErr) {}
         }
         if (material.fileUrl) {
             try {
-                const response = await fetch(material.fileUrl);
-                if (!response.ok) throw new Error('Fetch failed');
-                res.setHeader('Content-Type', 'application/pdf');
-                res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-                res.setHeader('Cache-Control', 'private, max-age=3600');
-                const buffer = await response.arrayBuffer();
-                res.send(Buffer.from(buffer));
-                return;
+                const upstream = await fetch(material.fileUrl);
+                if (!upstream.ok) throw new Error('Fetch failed');
+                const cl = upstream.headers.get('content-length');
+                if (cl) res.setHeader('Content-Length', cl);
+                const buffer = await upstream.arrayBuffer();
+                return res.send(Buffer.from(buffer));
             } catch (fetchErr) { return res.redirect(material.fileUrl); }
         }
         return res.status(404).send('No file');
@@ -351,6 +496,7 @@ app.get('/api/materials/id/:id/download', async (req, res) => {
     try {
         const material = await Material.findById(req.params.id);
         if (!material) return res.status(404).json({ error: 'Not found' });
+        await writeLog(req, 'download', { materialId: material._id, path: '/api/materials/id/' + material._id + '/download' });
         const visitorIP = req.ip || req.connection.remoteAddress;
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const alreadyDownloaded = await DownloadLog.findOne({ material: material._id, ip: visitorIP, timestamp: { $gte: today } });
@@ -508,21 +654,10 @@ async function addPDFWatermark(inputPath, outputPath) {
             const fy = 14;
             page.drawText(footer, { x: fx, y: fy, size: fsz, font, color: rgb(0.55, 0.55, 0.55), opacity: 0.7 });
             try {
-                const linkAnnot = pdfDoc.context.obj({
-                    Type: 'Annot',
-                    Subtype: 'Link',
-                    Rect: [fx - 2, fy - 2, fx + tw + 2, fy + fsz + 2],
-                    Border: [0, 0, 0],
-                    A: { Type: 'Action', S: 'URI', URI: pdfDoc.context.obj(footerUrl) }
-                });
+                const linkAnnot = pdfDoc.context.obj({ Type: 'Annot', Subtype: 'Link', Rect: [fx - 2, fy - 2, fx + tw + 2, fy + fsz + 2], Border: [0, 0, 0], A: { Type: 'Action', S: 'URI', URI: pdfDoc.context.obj(footerUrl) } });
                 const ref = pdfDoc.context.register(linkAnnot);
                 let annotsArray = page.node.Annots && page.node.Annots();
-                if (annotsArray && typeof annotsArray.push === 'function') {
-                    annotsArray.push(ref);
-                } else {
-                    const newArr = pdfDoc.context.obj([ref]);
-                    page.node.set(pdfDoc.context.obj('Annots'), newArr);
-                }
+                if (annotsArray && typeof annotsArray.push === 'function') { annotsArray.push(ref); } else { const newArr = pdfDoc.context.obj([ref]); page.node.set(pdfDoc.context.obj('Annots'), newArr); }
             } catch (linkErr) {}
         }
         const pdfBytes = await pdfDoc.save();
@@ -536,10 +671,7 @@ const ILovePDFFile = require('@ilovepdf/ilovepdf-nodejs/ILovePDFFile');
 
 async function compressPDF(inputPath, outputPath) {
     try {
-        if (!process.env.ILOVEPDF_PUBLIC_KEY || !process.env.ILOVEPDF_SECRET_KEY) {
-            console.warn('iLovePDF keys missing, skipping compression');
-            return inputPath;
-        }
+        if (!process.env.ILOVEPDF_PUBLIC_KEY || !process.env.ILOVEPDF_SECRET_KEY) { console.warn('iLovePDF keys missing, skipping compression'); return inputPath; }
         const instance = new ILovePDFApi(process.env.ILOVEPDF_PUBLIC_KEY, process.env.ILOVEPDF_SECRET_KEY);
         const task = instance.newTask('compress');
         await task.start();
@@ -552,10 +684,7 @@ async function compressPDF(inputPath, outputPath) {
         const compressedSize = fs.statSync(outputPath).size;
         console.log(`PDF compressed: ${originalSize} → ${compressedSize} bytes (${Math.round((1 - compressedSize / originalSize) * 100)}% saved)`);
         return compressedSize < originalSize ? outputPath : inputPath;
-    } catch (err) {
-        console.error('PDF compression failed:', err.message);
-        return inputPath;
-    }
+    } catch (err) { console.error('PDF compression failed:', err.message); return inputPath; }
 }
 
 async function addImageWatermark(inputPath, outputPath) {
@@ -622,10 +751,7 @@ app.post('/api/admin/materials', requireAuth, requireVerified, upload.single('fi
             if (file.mimetype === 'application/pdf') {
                 const compressedPath = file.path + '_compressed.pdf';
                 const result = await compressPDF(finalPath, compressedPath);
-                if (result === compressedPath) {
-                    if (finalPath !== file.path) fs.unlink(finalPath, () => {});
-                    finalPath = compressedPath;
-                }
+                if (result === compressedPath) { if (finalPath !== file.path) fs.unlink(finalPath, () => {}); finalPath = compressedPath; }
                 if (gfs) {
                     const pdfName = buildPdfName(data.title, data.examType);
                     const stream = gfs.openUploadStream(pdfName, { contentType: file.mimetype });
@@ -642,9 +768,7 @@ app.post('/api/admin/materials', requireAuth, requireVerified, upload.single('fi
             }
             fs.unlink(file.path, () => {});
             if (finalPath !== file.path) fs.unlink(finalPath, () => {});
-        } else if (req.body.externalLink) {
-            data.storage = 'external-link'; data.fileUrl = req.body.externalLink; data.type = 'link';
-        }
+        } else if (req.body.externalLink) { data.storage = 'external-link'; data.fileUrl = req.body.externalLink; data.type = 'link'; }
         const material = new Material(data);
         await material.save();
         const populated = await Material.findById(material._id).populate('category', 'name slug');
@@ -657,25 +781,14 @@ app.put('/api/admin/materials/:id', requireAuth, requireVerified, upload.single(
     try {
         const updates = { ...req.body, updatedAt: new Date() };
         const addWatermark = req.body.addWatermark === 'true' || req.body.addWatermark === true;
-        if (req.body.customPath !== undefined) {
-            const desired = (req.body.customPath || '').trim();
-            if (desired) updates.customPath = await ensureUniqueCustomPath(desired, req.params.id);
-            else delete updates.customPath;
-        }
+        if (req.body.customPath !== undefined) { const desired = (req.body.customPath || '').trim(); if (desired) updates.customPath = await ensureUniqueCustomPath(desired, req.params.id); else delete updates.customPath; }
         if (req.file) {
             let finalPath = req.file.path;
-            if (addWatermark) {
-                const wp = req.file.path + '_wm';
-                if (req.file.mimetype === 'application/pdf') finalPath = await addPDFWatermark(req.file.path, wp + '.pdf');
-                else if (req.file.mimetype.startsWith('image/')) finalPath = await addImageWatermark(req.file.path, wp + '.png');
-            }
+            if (addWatermark) { const wp = req.file.path + '_wm'; if (req.file.mimetype === 'application/pdf') finalPath = await addPDFWatermark(req.file.path, wp + '.pdf'); else if (req.file.mimetype.startsWith('image/')) finalPath = await addImageWatermark(req.file.path, wp + '.png'); }
             if (req.file.mimetype === 'application/pdf') {
                 const compressedPath = req.file.path + '_compressed.pdf';
                 const result = await compressPDF(finalPath, compressedPath);
-                if (result === compressedPath) {
-                    if (finalPath !== req.file.path) fs.unlink(finalPath, () => {});
-                    finalPath = compressedPath;
-                }
+                if (result === compressedPath) { if (finalPath !== req.file.path) fs.unlink(finalPath, () => {}); finalPath = compressedPath; }
                 if (gfs) {
                     if (updates.fileId && mongoose.isValidObjectId(updates.fileId)) { try { await gfs.delete(new mongoose.Types.ObjectId(updates.fileId)); } catch (e) {} }
                     const pdfName = buildPdfName(updates.title || req.body.title || 'material', updates.examType || req.body.examType);
@@ -702,11 +815,7 @@ app.put('/api/admin/materials/:id', requireAuth, requireVerified, upload.single(
 app.delete('/api/admin/materials/:id', requireAuth, requireVerified, async (req, res) => { try { await Material.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (err) { res.status(400).json({ error: err.message }); } });
 
 app.get('/api/admin/large-pdfs', requireAuth, requireVerified, async (req, res) => {
-    try {
-        const threshold = 10 * 1024 * 1024;
-        const large = await Material.find({ type: 'pdf', storage: 'mongo', fileId: { $exists: true, $ne: null }, fileSize: { $gt: threshold } }).select('title fileName fileSize fileId customPath slug examType').lean();
-        res.json(large);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+    try { const threshold = 10 * 1024 * 1024; const large = await Material.find({ type: 'pdf', storage: 'mongo', fileId: { $exists: true, $ne: null }, fileSize: { $gt: threshold } }).select('title fileName fileSize fileId customPath slug examType').lean(); res.json(large); } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/materials/:id/compress', requireAuth, requireVerified, async (req, res) => {
@@ -722,24 +831,16 @@ app.post('/api/admin/materials/:id/compress', requireAuth, requireVerified, asyn
         for await (const chunk of cursor) writeStream.write(chunk.data.buffer);
         await new Promise(r => writeStream.end(r));
         const result = await compressPDF(tmpIn, tmpOut);
-        if (result !== tmpOut || !fs.existsSync(tmpOut)) {
-            fs.unlink(tmpIn, () => {});
-            return res.status(400).json({ error: 'Compression produced no smaller file' });
-        }
+        if (result !== tmpOut || !fs.existsSync(tmpOut)) { fs.unlink(tmpIn, () => {}); return res.status(400).json({ error: 'Compression produced no smaller file' }); }
         try { await gfs.delete(new mongoose.Types.ObjectId(material.fileId)); } catch (e) {}
         const pdfName = material.fileName || buildPdfName(material.title, material.examType);
         const stream = gfs.openUploadStream(pdfName, { contentType: 'application/pdf' });
         fs.createReadStream(tmpOut).pipe(stream);
         await new Promise((resolve, reject) => { stream.on('finish', resolve); stream.on('error', reject); });
-        const oldSize = material.fileSize;
-        const newSize = fs.statSync(tmpOut).size;
-        material.fileId = stream.id;
-        material.fileSize = newSize;
-        material.fileName = pdfName;
-        material.updatedAt = new Date();
+        const oldSize = material.fileSize; const newSize = fs.statSync(tmpOut).size;
+        material.fileId = stream.id; material.fileSize = newSize; material.fileName = pdfName; material.updatedAt = new Date();
         await material.save();
-        fs.unlink(tmpIn, () => {});
-        fs.unlink(tmpOut, () => {});
+        fs.unlink(tmpIn, () => {}); fs.unlink(tmpOut, () => {});
         res.json({ success: true, oldSize, newSize, saved: oldSize - newSize });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -747,24 +848,12 @@ app.post('/api/admin/materials/:id/compress', requireAuth, requireVerified, asyn
 app.get('/api/admin/db-stats', requireAuth, requireVerified, async (req, res) => {
     try {
         const dbStats = await mongoose.connection.db.stats({ scale: 1024 * 1024 });
-        res.json({
-            storageSizeMB: Math.round(dbStats.storageSize * 100) / 100,
-            dataSizeMB: Math.round(dbStats.dataSize * 100) / 100,
-            indexSizeMB: Math.round(dbStats.indexSize * 100) / 100,
-            totalSizeMB: Math.round((dbStats.storageSize + dbStats.indexSize) * 100) / 100,
-            collections: dbStats.collections,
-            objects: dbStats.objects
-        });
+        const logCount = await Log.countDocuments();
+        res.json({ storageSizeMB: Math.round(dbStats.storageSize * 100) / 100, dataSizeMB: Math.round(dbStats.dataSize * 100) / 100, indexSizeMB: Math.round(dbStats.indexSize * 100) / 100, totalSizeMB: Math.round((dbStats.storageSize + dbStats.indexSize) * 100) / 100, collections: dbStats.collections, objects: dbStats.objects, logCount });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/admin/telegram-info', (req, res) => {
-    res.json({
-        channelUsername: process.env.TELEGRAM_CHANNEL_USERNAME || '',
-        channelUrl: process.env.TELEGRAM_CHANNEL_USERNAME ? `https://t.me/${process.env.TELEGRAM_CHANNEL_USERNAME}` : '',
-        configured: !!(process.env.TELEGRAM_CHANNEL_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_CHAT_ID)
-    });
-});
+app.get('/api/admin/telegram-info', (req, res) => { res.json({ channelUsername: process.env.TELEGRAM_CHANNEL_USERNAME || '', channelUrl: process.env.TELEGRAM_CHANNEL_USERNAME ? `https://t.me/${process.env.TELEGRAM_CHANNEL_USERNAME}` : '', configured: !!(process.env.TELEGRAM_CHANNEL_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_CHAT_ID) }); });
 
 app.post('/api/admin/broadcast', requireAuth, requireVerified, broadcastLimiter, async (req, res) => {
     try {
@@ -777,23 +866,8 @@ app.post('/api/admin/broadcast', requireAuth, requireVerified, broadcastLimiter,
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/admin/telegram-preview-material/:id', requireAuth, requireVerified, async (req, res) => {
-    try {
-        const mat = await Material.findById(req.params.id).populate('category', 'name slug').lean();
-        if (!mat) return res.status(404).json({ error: 'Not found' });
-        const b = buildMaterialBroadcast(mat);
-        res.json({ text: b.text, link: b.link });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/admin/telegram-preview-project/:id', requireAuth, requireVerified, async (req, res) => {
-    try {
-        const proj = await Project.findById(req.params.id).lean();
-        if (!proj) return res.status(404).json({ error: 'Not found' });
-        const b = buildProjectBroadcast(proj);
-        res.json({ text: b.text, link: b.link });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-});
+app.get('/api/admin/telegram-preview-material/:id', requireAuth, requireVerified, async (req, res) => { try { const mat = await Material.findById(req.params.id).populate('category', 'name slug').lean(); if (!mat) return res.status(404).json({ error: 'Not found' }); const b = buildMaterialBroadcast(mat); res.json({ text: b.text, link: b.link }); } catch (err) { res.status(500).json({ error: err.message }); } });
+app.get('/api/admin/telegram-preview-project/:id', requireAuth, requireVerified, async (req, res) => { try { const proj = await Project.findById(req.params.id).lean(); if (!proj) return res.status(404).json({ error: 'Not found' }); const b = buildProjectBroadcast(proj); res.json({ text: b.text, link: b.link }); } catch (err) { res.status(500).json({ error: err.message }); } });
 
 app.get('/api/admin/stats', requireAuth, requireVerified, async (req, res) => {
     try {
@@ -812,12 +886,84 @@ app.get('/api/admin/stats', requireAuth, requireVerified, async (req, res) => {
 app.get('/api/admin/messages', requireAuth, requireVerified, async (req, res) => { try { res.json(await Message.find().sort({ createdAt: -1 }).limit(50).lean()); } catch (err) { res.status(500).json({ error: err.message }); } });
 app.put('/api/admin/messages/:id/read', requireAuth, requireVerified, async (req, res) => { try { res.json(await Message.findByIdAndUpdate(req.params.id, { isRead: true }, { new: true })); } catch (err) { res.status(500).json({ error: err.message }); } });
 
+app.get('/api/admin/logs', requireAuth, requireVerified, adminLogsLimiter, async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 25, 100);
+        const query = {};
+        if (req.query.type && req.query.type !== 'all') query.type = req.query.type;
+        if (req.query.local === '1') query.isLocalhost = true;
+        if (req.query.search) { const s = String(req.query.search); query.$or = [{ path: { $regex: s, $options: 'i' } }, { ua: { $regex: s, $options: 'i' } }]; }
+        const [logs, total] = await Promise.all([
+            Log.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).populate('materialId', 'title slug customPath').lean(),
+            Log.countDocuments(query)
+        ]);
+        const items = logs.map(l => ({
+            _id: l._id,
+            type: l.type,
+            ipMasked: maskIP(decryptIP(l.ipEnc)),
+            ipHashShort: l.ipHash ? l.ipHash.slice(0, 12) + '…' : '',
+            os: l.os, browser: l.browser, device: l.device,
+            lang: l.lang, tz: l.tz, screen: l.screen,
+            path: l.path, referrer: l.referrer,
+            material: l.materialId ? { _id: l.materialId._id, title: l.materialId.title, slug: l.materialId.slug, customPath: l.materialId.customPath } : null,
+            isLocalhost: l.isLocalhost,
+            createdAt: l.createdAt
+        }));
+        res.json({ logs: items, total, page, pages: Math.ceil(total / limit) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/logs/:id', requireAuth, requireVerified, adminLogsLimiter, async (req, res) => {
+    try {
+        const l = await Log.findById(req.params.id).populate('materialId', 'title slug customPath').lean();
+        if (!l) return res.status(404).json({ error: 'Not found' });
+        res.json({
+            _id: l._id,
+            type: l.type,
+            ipRaw: decryptIP(l.ipEnc),
+            ipHash: l.ipHash,
+            ua: l.ua, os: l.os, browser: l.browser, device: l.device,
+            lang: l.lang, tz: l.tz, screen: l.screen,
+            path: l.path, referrer: l.referrer,
+            material: l.materialId || null,
+            meta: l.meta, isLocalhost: l.isLocalhost,
+            createdAt: l.createdAt, ttlAt: l.ttlAt
+        });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/admin/logs', requireAuth, requireVerified, adminLogsLimiter, async (req, res) => {
+    try {
+        const ids = Array.isArray(req.body.ids) ? req.body.ids.filter(id => mongoose.isValidObjectId(id)) : [];
+        if (!ids.length) return res.status(400).json({ error: 'No valid ids' });
+        const r = await Log.deleteMany({ _id: { $in: ids } });
+        res.json({ success: true, deleted: r.deletedCount });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/admin/logs/localhost', requireAuth, requireVerified, adminLogsLimiter, async (req, res) => {
+    try { const r = await Log.deleteMany({ isLocalhost: true }); res.json({ success: true, deleted: r.deletedCount }); } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/admin/logs/older-than/:days', requireAuth, requireVerified, adminLogsLimiter, async (req, res) => {
+    try {
+        const days = parseInt(req.params.days);
+        if (!days || days < 1 || days > 365) return res.status(400).json({ error: 'Invalid days' });
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const r = await Log.deleteMany({ createdAt: { $lt: cutoff } });
+        res.json({ success: true, deleted: r.deletedCount, cutoff });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/stats', async (req, res) => {
     try {
         const [materials, categories, projects, downloads] = await Promise.all([Material.countDocuments(), Category.countDocuments({ isActive: true }), Project.countDocuments({ status: { $ne: 'disabled' } }), Material.aggregate([{ $group: { _id: null, total: { $sum: '$downloads' } } }])]);
         res.json({ materials, categories, projects, downloads: downloads[0]?.total || 0 });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+function maskIP(ip) { if (!ip) return ''; const parts = String(ip).split('.'); if (parts.length === 4) return parts[0] + '.' + parts[1] + '.*.*'; return ip.length > 8 ? ip.slice(0, 8) + '***' : '***'; }
 
 const chatTimers = new Map();
 const SPAM_THRESHOLD = 5;
@@ -848,6 +994,7 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
         let action = null;
         if (lower.includes('scroll') || lower.includes('go to') || lower.includes('navigate')) { if (lower.includes('home') || lower.includes('top')) action = { type: 'scroll', target: 'home' }; else if (lower.includes('material')) action = { type: 'scroll', target: 'materials' }; else if (lower.includes('project')) action = { type: 'scroll', target: 'projects' }; else if (lower.includes('about')) action = { type: 'scroll', target: 'about' }; else if (lower.includes('contact')) action = { type: 'scroll', target: 'contact' }; else if (lower.includes('bottom')) action = { type: 'scroll', target: 'bottom' }; }
         const GROQ_API_KEY = process.env.GROQ_API_KEY;
+        let aiWorked = false;
         if (GROQ_API_KEY && GROQ_API_KEY.startsWith('gsk_')) {
             try {
                 let materials = [], projects = [], categories = [];
@@ -856,56 +1003,34 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
                 categories = await Category.find({ isActive: true }).sort({ order: 1 }).lean();
                 if (lower.includes('find') || lower.includes('search') || lower.includes('looking') || lower.includes('show') || lower.includes('list') || lower.includes('give') || lower.includes('link') || lower.includes('share')) { const terms = lower.replace(/find|search|looking for|need|want|show me|get me|do you have|i need|list|show|recent|latest|give|link|share/gi, '').trim(); if (terms.length > 1) { const filtered = await Material.find({ $or: [{ title: { $regex: terms, $options: 'i' } }, { subject: { $regex: terms, $options: 'i' } }, { description: { $regex: terms, $options: 'i' } }, { grade: { $regex: terms, $options: 'i' } }] }).populate('category', 'name slug').limit(8).lean(); if (filtered.length) materials = filtered; } }
                 let dbContext = '';
-                if (materials.length) dbContext += `\nMATERIALS:\n${materials.map(m => `- "${m.title}" | ${m.subject || 'N/A'} | Grade ${m.grade || 'N/A'} | Type: ${m.examType || m.type} | Open link: /materials?open=${m.slug} | Shareable link: /${m.customPath || 's/' + (m.shareableLink || m.slug)}`).join('\n')}`;
-                if (projects.length) dbContext += `\nPROJECTS:\n${projects.map(p => `- "${p.title}" | Status: ${p.status} | Progress: ${p.progress || 0}% | Tech: ${(p.techStack || []).join(', ')}`).join('\n')}`;
+                if (materials.length) dbContext += `\nMATERIALS:\n${materials.map(m => `- "${m.title}" | ${m.subject || 'N/A'} | Grade ${m.grade || 'N/A'} | Type: ${m.examType || m.type} | Shareable link: /s/${m.shareableLink || m.customPath || m.slug}`).join('\n')}`;
+                if (projects.length) dbContext += `\nPROJECTS:\n${projects.map(p => `- "${p.title}" | Status: ${p.status} | Progress: ${p.progress || 0}% | Tech: ${(p.techStack || []).join(', ')} | Shareable link: /s/${p.shareableLink || p.slug}`).join('\n')}`;
                 if (categories.length) dbContext += `\nCATEGORIES:\n${categories.map(c => `- ${c.name}: ${c.description || ''} | Link: /materials?category=${c.slug}`).join('\n')}`;
                 if (history?.length) dbContext += `\nHISTORY:\n${history.slice(-6).map(h => `${h.role}: ${h.content}`).join('\n')}`;
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), 10000);
-                const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` }, body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [{ role: 'user', content: `You are Cypher, a helpful AI assistant for CODE & CLASSROOM by Mayank Sagar. You have access to the real database below. Always use the database data when answering. If someone asks for materials, projects, or links, use the data provided. When listing materials, always include the link as a clickable link using the exact path shown. Never say you don't have access to links or that you can't share links because you have the links right in the database. Never make up fake materials or claim you've sent something since you cannot send anything. Keep replies short, using 2 to 4 sentences. Use **bold**, *italic*, and [links](URL) formatting. Use only professional English with no Hindi. Share socials only when asked: Instagram [@sagar.mayank_](https://instagram.com/sagar.mayank_) and GitHub [cypherXsagar](https://github.com/cypherXsagar). Never share credentials or code.\n\n${dbContext}\n\nUser: ${message}\n\nCypher:` }], max_tokens: 400, temperature: 0.7 }), signal: controller.signal });
+                const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_API_KEY}` }, body: JSON.stringify({ model: 'llama-3.1-8b-instant', messages: [{ role: 'user', content: `You are Cypher, a helpful AI assistant for CODE & CLASSROOM by Mayank Sagar. You have access to the real database below. Always use the database data when answering. If someone asks for materials, projects, or links, use the data provided. When listing materials, always include the shareable link in the exact form /s/<id> shown. Never say you don't have access to links. Never make up fake materials. Keep replies short, 2 to 4 sentences. Use **bold**, *italic*, and [links](URL). Use only professional English with no Hindi. Share socials only when asked: Instagram [@sagar.mayank_](https://instagram.com/sagar.mayank_) and GitHub [cypherXsagar](https://github.com/cypherXsagar). Never share credentials or code.\n\n${dbContext}\n\nUser: ${message}\n\nCypher:` }], max_tokens: 400, temperature: 0.7 }), signal: controller.signal });
                 clearTimeout(timeout);
                 const data = await resp.json();
-                if (data.choices?.[0]?.message?.content) { let reply = data.choices[0].message.content.trim(); if (reply && reply.length > 5) { if (!reply.match(/[.!?)]$/)) reply += '.'; const slangCheck = ['bhai', 'tera', 'badhiya', 'accha', 'yaar', 'arey', 'kya baat', 'bilkul', 'aur bhai', 'ji', 'app', 'mereko', 'skte']; if (slangCheck.some(w => reply.toLowerCase().includes(w))) reply = "Hello! I'm Cypher. How can I help you with study materials or projects today?"; const result = { reply }; if (action) result.action = action; return res.json(result); } }
-            } catch (e) {}
+                if (data.choices?.[0]?.message?.content) { let reply = data.choices[0].message.content.trim(); if (reply && reply.length > 5) { if (!reply.match(/[.!?)]$/)) reply += '.'; const slangCheck = ['bhai', 'tera', 'badhiya', 'accha', 'yaar', 'arey', 'kya baat', 'bilkul', 'aur bhai', 'ji', 'app', 'mereko', 'skte']; if (slangCheck.some(w => reply.toLowerCase().includes(w))) reply = "Hello! I'm Cypher. How can I help you with study materials or projects today?"; aiWorked = true; const result = { reply }; if (action) result.action = action; return res.json(result); } }
+            } catch (e) { console.error('Groq AI error:', e.message); }
         }
-        let reply = "Hello! I'm Cypher, your study assistant. How can I help you today?";
-        if (lower.includes('instagram') || lower.includes('ig') || lower.includes('social')) reply = "📸 **Instagram**: [@sagar.mayank_](https://instagram.com/sagar.mayank_)\n💻 **GitHub**: [cypherXsagar](https://github.com/cypherXsagar)";
-        else if (lower.includes('github')) reply = "**GitHub**: [cypherXsagar](https://github.com/cypherXsagar)";
-        else if (lower.includes('hello') || lower.includes('hi') || lower.includes('hey')) reply = "Hello! I'm Cypher. What can I help you with today?";
-        else if (lower.includes('who are you')) reply = "I'm **Cypher**, the AI study assistant for CODE & CLASSROOM.";
-        else if (lower.includes('mayank') || lower.includes('owner')) reply = "**Mayank Sagar** created this portfolio.\n\n📸 [Instagram](https://instagram.com/sagar.mayank_)\n💻 [GitHub](https://github.com/cypherXsagar)";
-        else if (lower.includes('contact')) reply = "Reach Mayank via **[Contact](/contact)** or [Instagram](https://instagram.com/sagar.mayank_)";
-        else if (lower.includes('help') || lower.includes('what can you do') || lower.includes('available') || lower.includes('what do you have')) { try { const [mats, projs, cats] = await Promise.all([Material.find().populate('category', 'name slug').sort({ createdAt: -1 }).limit(4).lean(), Project.find({ status: { $ne: 'disabled' } }).sort({ createdAt: -1 }).limit(4).lean(), Category.find({ isActive: true }).sort({ order: 1 }).lean()]); reply = "Here's what's available:\n\n"; if (mats.length) reply += `📚 **Recent Materials:**\n${mats.map(m => `• **${m.title}** ${m.subject ? `*(${m.subject})*` : ''}\n  [View →](/materials?open=${m.slug}) | [Share →](/${m.customPath || 's/' + (m.shareableLink || m.slug)})`).join('\n')}\n\n`; if (projs.length) reply += `🚀 **Recent Projects:**\n${projs.map(p => `• **${p.title}** — *${(p.status || 'planning').replace('-', ' ')}*`).join('\n')}\n  [View all →](/projects)\n\n`; if (cats.length) reply += `📂 **Categories:** ${cats.map(c => `[${c.name}](/materials?category=${c.slug})`).join(' | ')}\n\nI can search for specific topics — just ask!`; } catch (e) { reply = "I can find materials, show projects, and navigate the site. Just ask!"; } }
-        else if (lower.includes('find') || lower.includes('search') || lower.includes('looking') || lower.includes('show') || lower.includes('list') || lower.includes('recent') || lower.includes('latest') || lower.includes('give') || lower.includes('link') || lower.includes('share')) { const terms = lower.replace(/find|search|looking for|need|want|show me|get me|do you have|i need|list|show|recent|latest|give|link|share/gi, '').trim(); try { let results = terms.length > 1 ? await Material.find({ $or: [{ title: { $regex: terms, $options: 'i' } }, { subject: { $regex: terms, $options: 'i' } }] }).populate('category', 'name slug').limit(8).lean() : await Material.find().populate('category', 'name slug').sort({ createdAt: -1 }).limit(6).lean(); reply = results.length ? `📚 **Found:**\n\n${results.map(m => `• **${m.title}** ${m.subject ? `*(${m.subject})*` : ''}${m.grade ? ` - Grade ${m.grade}` : ''}\n  [View →](/materials?open=${m.slug}) | [Share →](/${m.customPath || 's/' + (m.shareableLink || m.slug)})`).join('\n\n')}` : `Nothing found for *"${terms}"*. Try **[Materials](/materials)**.`; } catch (e) { reply = "Visit **[Materials](/materials)**."; } }
-        else if (lower.includes('project') || lower.includes('built') || lower.includes('work')) { try { const projects = await Project.find({ status: { $ne: 'disabled' } }).sort({ createdAt: -1 }).limit(8).lean(); reply = projects.length ? `🚀 **Projects:**\n\n${projects.map(p => `• **${p.title}** — *${(p.status || 'planning').replace('-', ' ')}*${p.progress ? ` (${p.progress}%)` : ''}`).join('\n\n')}\n\n**[View all →](/projects)**` : "Check **[Projects](/projects)**."; } catch (e) { reply = "Visit **[Projects](/projects)**."; } }
-        else if (lower.includes('category') || lower.includes('categories') || lower.includes('subject')) { try { const cats = await Category.find({ isActive: true }).sort({ order: 1 }).lean(); reply = cats.length ? `📂 **Categories:**\n\n${cats.map(c => `• **${c.name}**\n  [Browse →](/materials?category=${c.slug})`).join('\n\n')}` : "Browse **[Materials](/materials)**."; } catch (e) { reply = "Visit **[Materials](/materials)**."; } }
-        else if (lower.includes('free') && (lower.includes('resource') || lower.includes('tool') || lower.includes('learn'))) reply = "**Free resources:**\n• [FreeCodeCamp](https://freecodecamp.org)\n• [MDN Docs](https://developer.mozilla.org)\n• [GitHub Student Pack](https://education.github.com/pack)\n• [W3Schools](https://w3schools.com)";
-        else if (lower.includes('thanks') || lower.includes('thank')) reply = "You're welcome! Need anything else?";
-        const result = { reply };
-        if (action) result.action = action;
-        res.json(result);
-    } catch (err) { res.json({ reply: "I apologize, an error occurred. Please try again." }); }
+        if (!aiWorked) return res.json({ reply: "AI chat is unreachable at the moment. Sorry for the inconvenience." });
+    } catch (err) { console.error('Chat error:', err); res.json({ reply: "AI chat is unreachable at the moment. Sorry for the inconvenience." }); }
 });
 
 app.get('/s/:shareId', async (req, res) => {
     try {
-        let item = await Material.findOne({ $or: [{ shareableLink: req.params.shareId }, { slug: req.params.shareId }, { customPath: req.params.shareId.toLowerCase() }] }).lean();
-        if (item) return res.redirect(`/${item.customPath || 'materials?open=' + item.slug}`);
-        item = await Project.findOne({ $or: [{ shareableLink: req.params.shareId }, { slug: req.params.shareId }] }).lean();
-        if (item) return res.redirect('/projects');
+        const id = String(req.params.shareId || '').toLowerCase();
+        const mat = await Material.findOne({ $or: [{ shareableLink: id }, { slug: id }, { customPath: id }] }).lean();
+        if (mat) return res.redirect(`/materials?open=${encodeURIComponent(mat.slug)}`);
+        const proj = await Project.findOne({ $or: [{ shareableLink: id }, { slug: id }] }).lean();
+        if (proj) return res.redirect('/projects');
         res.redirect('/');
     } catch (err) { res.redirect('/'); }
 });
 
 function htmlEscape(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-
-function buildMaterialPage(mat) {
-    const title = `${mat.title} — CODE & CLASSROOM`;
-    const desc = mat.description || `Study material: ${mat.title}`;
-    const url = `https://mayanksagar.onrender.com/${mat.customPath || 'materials?open=' + mat.slug}`;
-    const ogImg = 'https://i.postimg.cc/90cpDgdd/cropped-circle-image.png';
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${htmlEscape(title)}</title><meta name="description" content="${htmlEscape(desc)}"><meta property="og:type" content="article"><meta property="og:site_name" content="CODE &amp; CLASSROOM"><meta property="og:title" content="${htmlEscape(mat.title)} — CODE &amp; CLASSROOM"><meta property="og:description" content="${htmlEscape(desc)}"><meta property="og:url" content="${htmlEscape(url)}"><meta property="og:image" content="${ogImg}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${htmlEscape(mat.title)} — CODE &amp; CLASSROOM"><meta name="twitter:description" content="${htmlEscape(desc)}"><meta name="twitter:image" content="${ogImg}"><link rel="icon" type="image/x-icon" href="https://i.postimg.cc/90cpDgdd/cropped-circle-image.png"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,400&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/css/materials.css"></head><body><nav class="navbar" id="nb"><a href="/" class="navbar-logo">C<span>&amp;</span>C</a><ul class="navbar-links" id="nl"><li><a href="/">Home</a></li><li><a href="/materials" class="active">Materials</a></li><li><a href="/projects">Projects</a></li><li><a href="/about">About</a></li><li><a href="/contact">Contact</a></li></ul><button class="navbar-toggle" id="nt" aria-label="Toggle menu"><span></span><span></span><span></span></button></nav><section class="materials-section"><div class="container"><div class="section-header"><span class="section-eyebrow">Study Material</span><h2 class="section-title">${htmlEscape(mat.title)}</h2><p class="section-description">${htmlEscape(desc)}</p></div><div id="materialDetail" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;max-width:720px"><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px"><span class="material-type-badge badge-${htmlEscape(mat.type || 'note')}">${htmlEscape(mat.type || 'note')}</span>${mat.category && mat.category.name ? `<span class="tech-tag">${htmlEscape(mat.category.name)}</span>` : ''}${mat.subject ? `<span class="tech-tag">${htmlEscape(mat.subject)}</span>` : ''}${mat.grade ? `<span class="tech-tag">Grade ${htmlEscape(mat.grade)}</span>` : ''}</div><p style="color:var(--text-secondary);line-height:1.7;margin-bottom:20px">${htmlEscape(desc)}</p><div style="display:flex;gap:16px;font-size:12px;color:var(--text-dim);margin-bottom:24px"><span><i class="fas fa-eye"></i> ${mat.views || 0} views</span><span><i class="fas fa-download"></i> ${mat.downloads || 0} downloads</span><span>${new Date(mat.createdAt).toLocaleDateString()}</span></div><div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn btn-primary" href="/materials?open=${encodeURIComponent(mat.slug)}"><i class="fas fa-book-open"></i> Open in Materials</a><button class="btn btn-outline" onclick="navigator.clipboard.writeText(location.href).then(function(){var t=document.getElementById('dl-toast');if(!t){t=document.createElement('div');t.id='dl-toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#141317;color:#e8e4dd;border:1px solid rgba(201,166,104,0.4);padding:12px 20px;border-radius:12px;font-size:13px;z-index:100000;opacity:0;transition:all .3s;box-shadow:0 10px 30px rgba(0,0,0,0.5);font-family:Inter,sans-serif;pointer-events:none';document.body.appendChild(t);}t.textContent='Link copied to clipboard';requestAnimationFrame(function(){t.style.opacity='1';t.style.transform='translateX(-50%) translateY(0)';});clearTimeout(t._h);t._h=setTimeout(function(){t.style.opacity='0';t.style.transform='translateX(-50%) translateY(20px)';},3000);})"><i class="fas fa-link"></i> Copy Link</button></div></div></div></section><footer class="footer"><div class="container"><div class="footer-bottom"><span>Mayank Sagar</span><span>&copy; 2026 CODE &amp; CLASSROOM</span></div></div></footer><script src="/app.js"></script></body></html>`;
-}
 
 app.get('/admin', requireAuth, requireVerified, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.get('/admin-verify', requireAuth, (req, res) => { if (req.session?.isVerified) return res.redirect('/admin'); res.sendFile(path.join(__dirname, 'public', 'admin-verify.html')); });
@@ -914,19 +1039,7 @@ app.get('/materials', (req, res) => res.sendFile(path.join(__dirname, 'public', 
 app.get('/projects', (req, res) => res.sendFile(path.join(__dirname, 'public', 'projects.html')));
 app.get('/about', (req, res) => res.sendFile(path.join(__dirname, 'public', 'about.html')));
 app.get('/contact', (req, res) => res.sendFile(path.join(__dirname, 'public', 'contact.html')));
-
-app.get('/:path', async (req, res, next) => {
-    const p = String(req.params.path || '').toLowerCase();
-    if (!p) return next();
-    if (['login', 'admin', 'admin-verify', 'materials', 'projects', 'about', 'contact', 's', 'auth', 'api', 'style.css', 'app.js', 'css', 'js'].includes(p)) return next();
-    try {
-        const mat = await Material.findOne({ customPath: p }).populate('category', 'name slug').lean();
-        if (!mat) return next();
-        Material.findByIdAndUpdate(mat._id, { $inc: { views: 1 } }).catch(() => {});
-        res.set('Content-Type', 'text/html');
-        res.send(buildMaterialPage(mat));
-    } catch (err) { next(); }
-});
+app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
