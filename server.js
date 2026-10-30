@@ -279,11 +279,165 @@ async function sendTelegramChannel(text, previewUrl) {
     } catch (err) { return { ok: false, error: err.message }; }
 }
 
+function xmlEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c])); }
+
+function wrapText(str, maxCharsPerLine) {
+    const words = String(str || '').split(/\s+/);
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+        if ((cur + ' ' + w).trim().length > maxCharsPerLine) {
+            if (cur) lines.push(cur.trim());
+            cur = w;
+        } else {
+            cur += ' ' + w;
+        }
+    }
+    if (cur) lines.push(cur.trim());
+    return lines;
+}
+
+async function renderCardImage(opts) {
+    const { eyebrow, title, metaLine, footer, emoji } = opts;
+    const W = 1080, H = 1080;
+    
+    let logoBase64 = '';
+    try {
+        const logoBuffer = await getWatermarkMark();
+        if (logoBuffer) logoBase64 = logoBuffer.toString('base64');
+    } catch (e) {}
+
+    const titleLines = wrapText(title, 20);
+    let titleSize = 90;
+    const len = titleLines.length;
+    if (len === 2) titleSize = 80;
+    else if (len === 3) titleSize = 70;
+    else if (len === 4) titleSize = 58;
+    else if (len === 5) titleSize = 50;
+    else if (len === 6) titleSize = 44;
+    else if (len >= 7) titleSize = 38;
+    
+    const lineHeight = titleSize * 1.15;
+    const totalTitleHeight = (titleLines.length - 1) * lineHeight;
+    
+    // Symmetrical Grouping
+    const blockHeight = 60 + 40 + totalTitleHeight + titleSize + 40 + 40;
+    const blockStartY = (H - blockHeight) / 2;
+    
+    const eyebrowY = blockStartY + 20;
+    const titleStartY = eyebrowY + 40 + titleSize + 40;
+    const titleBlock = titleLines.map((line, i) => `<text x="80" y="${titleStartY + (i * lineHeight)}" font-family="Fraunces, Georgia, serif" font-size="${titleSize}" font-weight="500" letter-spacing="-1" fill="#e8e4dd">${xmlEsc(line)}</text>`).join('');
+    
+    const metaY = titleStartY + totalTitleHeight + 40;
+    const metaPills = metaLine.split('·').map(s => s.trim()).filter(Boolean);
+    const metaBlock = metaPills.map((pill, i) => {
+        const xPos = 80 + (i * 170); 
+        return `<rect x="${xPos}" y="${metaY}" width="150" height="40" rx="20" fill="rgba(201,166,104,0.05)" stroke="rgba(201,166,104,0.2)" stroke-width="1"/>
+                <text x="${xPos + 75}" y="${metaY + 25}" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="500" fill="#c9a668">${xmlEsc(pill.toUpperCase())}</text>`;
+    }).join('');
+
+    // Only show footer text if it's not empty
+    const footerBlock = footer ? `<text x="80" y="${H - 180}" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8a8780">${xmlEsc(footer)}</text>` : '';
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+<defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#c9a668"/>
+        <stop offset="50%" stop-color="#e8d5a3"/>
+        <stop offset="100%" stop-color="#c9a668"/>
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0d0c0f"/>
+        <stop offset="100%" stop-color="#141317"/>
+    </linearGradient>
+</defs>
+
+<rect width="${W}" height="${H}" fill="url(#bgGrad)"/>
+<rect x="40" y="40" width="1000" height="1000" fill="none" stroke="url(#gold)" stroke-width="2" opacity="0.3" rx="20"/>
+
+<g opacity="0.04">
+    ${Array.from({length: 10}).map((_, i) => Array.from({length: 10}).map((_, j) => `<circle cx="${100 + i * 100}" cy="${100 + j * 100}" r="1.5" fill="#c9a668"/>`).join('')).join('')}
+</g>
+
+<rect x="80" y="80" width="920" height="2" fill="url(#gold)" opacity="0.8"/>
+<text x="80" y="160" font-family="Fraunces, Georgia, serif" font-size="38" font-weight="500" fill="#e8e4dd">CODE <tspan fill="#c9a668" font-style="italic">&amp;</tspan> CLASSROOM</text>
+<text x="80" y="195" font-family="Inter, Arial, sans-serif" font-size="14" letter-spacing="6" fill="#c9a668" opacity="0.7">MAYANKSAGAR.ONRENDER.COM</text>
+
+<rect x="80" y="${eyebrowY}" width="40" height="2" fill="#c9a668"/>
+<text x="135" y="${eyebrowY + 8}" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="8" fill="#c9a668">${xmlEsc(emoji + ' ' + eyebrow)}</text>
+${titleBlock}
+${metaBlock}
+
+<rect x="80" y="${H - 240}" width="920" height="2" fill="url(#gold)" opacity="0.8"/>
+${footerBlock}
+<text x="80" y="${H - 120}" font-family="Fraunces, Georgia, serif" font-size="24" font-style="italic" fill="#c9a668">— CODE &amp; CLASSROOM</text>
+
+<circle cx="${W - 130}" cy="${H - 130}" r="55" fill="rgba(201,166,104,0.05)" stroke="url(#gold)" stroke-width="1.5" opacity="0.8"/>
+${logoBase64 ? `<image href="data:image/png;base64,${logoBase64}" x="${W - 180}" y="${H - 180}" width="100" height="100" opacity="0.9"/>` : `<text x="${W - 130}" y="${H - 115}" text-anchor="middle" font-family="Fraunces, Georgia, serif" font-size="32" font-weight="500" fill="#c9a668">C&amp;C</text>`}
+</svg>`;
+
+    try {
+        return await sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer();
+    } catch (err) {
+        console.error('Card render failed:', err.message);
+        return null;
+    }
+}
+async function buildMaterialCard(mat) {
+    const cat = mat.category && mat.category.name ? mat.category.name : '';
+    const metaParts = [];
+    if (mat.subject) metaParts.push(mat.subject);
+    if (mat.grade) metaParts.push('Grade ' + mat.grade);
+    if (mat.examType) metaParts.push(String(mat.examType).replace('-', ' '));
+    if (!metaParts.length && cat) metaParts.push(cat);
+
+    return await renderCardImage({
+        eyebrow: (mat.examType || mat.type || 'material').replace('-', ' ').toUpperCase(),
+        title: mat.title || 'Untitled',
+        metaLine: metaParts.join(' · '),
+        footer: 'Tap below to open the full material',
+        emoji: '📚'
+    });
+}
+
+async function buildProjectCard(proj) {
+    const metaParts = [];
+    if (proj.status) metaParts.push(String(proj.status).replace('-', ' '));
+    if (proj.techStack && proj.techStack.length) metaParts.push(...proj.techStack.slice(0, 2));
+    
+    return await renderCardImage({
+        eyebrow: 'NEW PROJECT',
+        title: proj.title || 'Untitled',
+        metaLine: metaParts.join(' · ') || 'Project update',
+        footer: 'Tap below to explore the project',
+        emoji: '🚀'
+    });
+}
+
+async function sendTelegramChannelPhoto(imageBuffer, caption, buttonUrl, buttonText) {
+    const botToken = process.env.TELEGRAM_CHANNEL_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHANNEL_CHAT_ID;
+    if (!botToken || !chatId) return { ok: false, error: 'Channel bot not configured' };
+    if (!imageBuffer) return { ok: false, error: 'No image' };
+    try {
+        const fd = new FormData();
+        fd.append('chat_id', chatId);
+        fd.append('caption', caption);
+        fd.append('parse_mode', 'Markdown');
+        if (buttonUrl) {
+            fd.append('reply_markup', JSON.stringify({ inline_keyboard: [[{ text: buttonText || '📖 Open', url: buttonUrl }]] }));
+        }
+        fd.append('photo', new Blob([imageBuffer], { type: 'image/png' }), 'card.png');
+        const r = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: fd });
+        return await r.json();
+    } catch (err) { return { ok: false, error: err.message }; }
+}
+
 function mdEscape(s) { return String(s || '').replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1'); }
 
-function buildMaterialBroadcast(mat) {
+async function buildMaterialBroadcast(mat) {
     const base = 'https://mayanksagar.onrender.com';
-    const shareId = mat.shareableLink || mat.customPath || mat.slug;
+    const shareId = mat.customPath || mat.shareableLink || mat.slug;
     const link = `${base}/s/${shareId}`;
     const type = (mat.examType || mat.type || 'resource').replace('-', ' ');
     const cat = mat.category && mat.category.name ? mat.category.name : '';
@@ -294,10 +448,11 @@ function buildMaterialBroadcast(mat) {
     msg += `🏷 ${mdEscape(type)}\n\n`;
     msg += `🔗 [Open Material](${link})\n\n`;
     msg += `_via CODE & CLASSROOM_`;
-    return { text: msg, link };
+    const image = await buildMaterialCard(mat);
+    return { text: msg, link, image };
 }
 
-function buildProjectBroadcast(project) {
+async function buildProjectBroadcast(project) {
     const base = 'https://mayanksagar.onrender.com';
     const link = `${base}/s/${project.shareableLink || project.slug}`;
     let msg = `🚀 *New Project Launched*\n\n`;
@@ -309,7 +464,8 @@ function buildProjectBroadcast(project) {
     if (project.githubUrl) msg += `💻 [Source Code](${project.githubUrl})\n`;
     msg += `\n🔗 [View Project](${link})\n\n`;
     msg += `_via CODE & CLASSROOM_`;
-    return { text: msg, link };
+    const image = await buildProjectCard(project);
+    return { text: msg, link, image };
 }
 
 app.post('/api/logs/visit', visitLogLimiter, async (req, res) => {
@@ -570,7 +726,7 @@ app.post('/api/admin/projects', requireAuth, requireVerified, upload.fields([{ n
         if (req.files?.images?.length) { const uploads = await Promise.all(req.files.images.map(f => cloudinary.uploader.upload(f.path, { folder: 'portfolio/projects' }))); data.images = uploads.map(u => u.secure_url); req.files.images.forEach(f => fs.unlink(f.path, () => {})); }
         const project = new Project(data);
         await project.save();
-        if (req.body.broadcast === 'true') { const b = buildProjectBroadcast(project); sendTelegramChannel(b.text, b.link).catch(() => {}); }
+        if (req.body.broadcast === 'true') { buildProjectBroadcast(project).then(b => { if (b.image) return sendTelegramChannelPhoto(b.image, b.text, b.link, '🚀 View Project').then(r => { if (!r.ok) return sendTelegramChannel(b.text, b.link); }).catch(() => sendTelegramChannel(b.text, b.link)); return sendTelegramChannel(b.text, b.link); }).catch(() => {}); }
         res.status(201).json(await Project.findById(project._id).populate('category', 'name slug'));
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -772,7 +928,7 @@ app.post('/api/admin/materials', requireAuth, requireVerified, upload.single('fi
         const material = new Material(data);
         await material.save();
         const populated = await Material.findById(material._id).populate('category', 'name slug');
-        if (req.body.broadcast === 'true') { const b = buildMaterialBroadcast(populated); sendTelegramChannel(b.text, b.link).catch(() => {}); }
+        if (req.body.broadcast === 'true') { buildMaterialBroadcast(populated).then(b => { if (b.image) return sendTelegramChannelPhoto(b.image, b.text, b.link, '📖 Open Material').then(r => { if (!r.ok) return sendTelegramChannel(b.text, b.link); }).catch(() => sendTelegramChannel(b.text, b.link)); return sendTelegramChannel(b.text, b.link); }).catch(() => {}); }
         res.status(201).json(populated);
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
@@ -857,18 +1013,60 @@ app.get('/api/admin/telegram-info', (req, res) => { res.json({ channelUsername: 
 
 app.post('/api/admin/broadcast', requireAuth, requireVerified, broadcastLimiter, async (req, res) => {
     try {
-        const { text, previewUrl } = req.body;
+        const { text, previewUrl, asImage, materialId, projectId } = req.body;
         if (!text || text.trim().length === 0) return res.status(400).json({ error: 'Message text required' });
-        if (text.length > 4000) return res.status(400).json({ error: 'Message too long (max 4000 chars)' });
+        
+        if (asImage) {
+            let image = null;
+            let caption = text;
+            
+            // Telegram caption limit is 1024. If text is long, split it.
+            if (text.length > 1000) {
+                caption = text.slice(0, 990) + '... (continued in channel)';
+            }
+
+            if (materialId && mongoose.isValidObjectId(materialId)) {
+                const m = await Material.findById(materialId).populate('category', 'name').lean();
+                if (m) image = await buildMaterialCard(m);
+            } else if (projectId && mongoose.isValidObjectId(projectId)) {
+                const p = await Project.findById(projectId).lean();
+                if (p) image = await buildProjectCard(p);
+            } else {
+                // CUSTOM TEXT MODE: Put the user's text directly into the image title
+                // If text is super long, we clip the title to 150 chars so it doesn't break the design
+                const titleText = text.length > 150 ? text.slice(0, 150).replace(/\n/g, ' ') + '...' : text.replace(/\n/g, ' ');
+                
+                image = await renderCardImage({ 
+                    eyebrow: 'ANNOUNCEMENT', 
+                    title: titleText, 
+                    metaLine: 'CODE & CLASSROOM', 
+                    footer: '', 
+                    emoji: '📢' 
+                });
+            }
+
+            if (image) {
+                // Try sending photo with caption
+                const r = await sendTelegramChannelPhoto(image, caption, previewUrl || null, '🔗 Open');
+                if (r.ok) return res.json({ success: true, messageId: r.result?.message_id, mode: 'image' });
+                
+                // Fallback if photo fails
+                const r2 = await sendTelegramChannel(text, previewUrl);
+                if (r2.ok) return res.json({ success: true, messageId: r2.result?.message_id, mode: 'text_fallback' });
+                
+                return res.status(400).json({ error: r2.description || r2.error || 'Telegram send failed' });
+            }
+        }
+        
+        // Plain text fallback
         const result = await sendTelegramChannel(text, previewUrl);
-        if (result.ok) res.json({ success: true, messageId: result.result?.message_id });
+        if (result.ok) res.json({ success: true, messageId: result.result?.message_id, mode: 'text' });
         else res.status(400).json({ error: result.description || result.error || 'Telegram send failed' });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/admin/telegram-preview-material/:id', requireAuth, requireVerified, async (req, res) => { try { const mat = await Material.findById(req.params.id).populate('category', 'name slug').lean(); if (!mat) return res.status(404).json({ error: 'Not found' }); const b = buildMaterialBroadcast(mat); res.json({ text: b.text, link: b.link }); } catch (err) { res.status(500).json({ error: err.message }); } });
-app.get('/api/admin/telegram-preview-project/:id', requireAuth, requireVerified, async (req, res) => { try { const proj = await Project.findById(req.params.id).lean(); if (!proj) return res.status(404).json({ error: 'Not found' }); const b = buildProjectBroadcast(proj); res.json({ text: b.text, link: b.link }); } catch (err) { res.status(500).json({ error: err.message }); } });
-
+app.get('/api/admin/telegram-preview-material/:id', requireAuth, requireVerified, async (req, res) => { try { const mat = await Material.findById(req.params.id).populate('category', 'name slug').lean(); if (!mat) return res.status(404).json({ error: 'Not found' }); const b = await buildMaterialBroadcast(mat); res.json({ text: b.text, link: b.link, hasImage: !!b.image }); } catch (err) { res.status(500).json({ error: err.message }); } });
+app.get('/api/admin/telegram-preview-project/:id', requireAuth, requireVerified, async (req, res) => { try { const proj = await Project.findById(req.params.id).lean(); if (!proj) return res.status(404).json({ error: 'Not found' }); const b = await buildProjectBroadcast(proj); res.json({ text: b.text, link: b.link, hasImage: !!b.image }); } catch (err) { res.status(500).json({ error: err.message }); } });
 app.get('/api/admin/stats', requireAuth, requireVerified, async (req, res) => {
     try {
         const today = new Date(); today.setHours(0, 0, 0, 0);
