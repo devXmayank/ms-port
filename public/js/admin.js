@@ -233,20 +233,33 @@
         var cb = document.getElementById('bcClearBtn');
         if (cb && !cb.dataset.bound) { cb.addEventListener('click', function () { document.getElementById('bcText').value = ''; document.getElementById('bcPreview').innerHTML = 'Nothing yet. Type a message above or load a template.'; document.getElementById('bcStatus').textContent = ''; }); cb.dataset.bound = '1'; }
         var sb = document.getElementById('bcSendBtn');
-        if (sb && !sb.dataset.bound) {
-            sb.addEventListener('click', async function () {
-                var text = document.getElementById('bcText').value.trim();
+        if (sb && !sb.dataset.bound) {           
+             sb.addEventListener('click', async function () {
+                var ta = document.getElementById('bcText');
+                var text = ta.value.trim();
                 if (!text) return toast('Write something first', 'error');
-                if (!confirm('Send this message to your Telegram channel?')) return;
+                var asImage = document.getElementById('bcAsImage') && document.getElementById('bcAsImage').checked;
+                if (!confirm((asImage ? 'Send as image card' : 'Send as text') + ' to your Telegram channel?')) return;
                 var btn = this; var orig = btn.innerHTML;
                 btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
                 try {
                     var preview = (text.match(/https?:\/\/\S+/) || [])[0] || '';
-                    var r = await fetch(A + '/api/admin/broadcast', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, previewUrl: preview }) });
+                    var body = { text: text, previewUrl: preview, asImage: asImage };
+                    if (asImage) {
+                        if (ta.dataset.materialId) body.materialId = ta.dataset.materialId;
+                        if (ta.dataset.projectId) body.projectId = ta.dataset.projectId;
+                    }
+                    var r = await fetch(A + '/api/admin/broadcast', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                     var d = await r.json();
                     var st = document.getElementById('bcStatus');
-                    if (d.success) { toast('Sent to channel!', 'success'); if (st) st.innerHTML = '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> Sent at ' + new Date().toLocaleTimeString() + ' (message id ' + d.messageId + ')</span>'; }
-                    else { toast(d.error || 'Failed to send', 'error'); if (st) st.innerHTML = '<span style="color:var(--red)"><i class="fas fa-exclamation-circle"></i> ' + esc(d.error || 'Failed') + '</span>'; }
+                    if (d.success) {
+                        var modeLabel = d.mode === 'image' ? 'image card' : (d.mode === 'text_fallback' ? 'text (image failed)' : 'text');
+                        toast('Sent as ' + modeLabel + '!', 'success');
+                        if (st) st.innerHTML = '<span style="color:var(--green)"><i class="fas fa-check-circle"></i> Sent as ' + modeLabel + ' at ' + new Date().toLocaleTimeString() + ' (id ' + d.messageId + ')</span>';
+                    } else {
+                        toast(d.error || 'Failed to send', 'error');
+                        if (st) st.innerHTML = '<span style="color:var(--red)"><i class="fas fa-exclamation-circle"></i> ' + esc(d.error || 'Failed') + '</span>';
+                    }
                 } catch (e) { toast('Network error', 'error'); }
                 btn.disabled = false; btn.innerHTML = orig;
             });
@@ -259,7 +272,9 @@
                     var r = await fetch(A + '/api/materials?limit=1'); var d = await r.json(); var m = (d.materials || [])[0];
                     if (!m) return toast('No materials yet', 'error');
                     var p = await (await fetch(A + '/api/admin/telegram-preview-material/' + m._id)).json();
-                    document.getElementById('bcText').value = p.text; document.getElementById('bcPreview').innerHTML = renderMarkdownPreview(p.text); document.getElementById('bcStatus').textContent = 'Loaded: ' + m.title;
+                    document.getElementById('bcText').value = p.text;
+                    document.getElementById('bcText').dataset.materialId = m._id;
+                    document.getElementById('bcText').dataset.projectId = ''; document.getElementById('bcPreview').innerHTML = renderMarkdownPreview(p.text); document.getElementById('bcStatus').textContent = 'Loaded: ' + m.title;
                 } catch (e) { toast('Failed to load', 'error'); }
             });
             lm.dataset.bound = '1';
@@ -271,7 +286,9 @@
                     var r = await fetch(A + '/api/projects?limit=1'); var d = await r.json(); var p = (d.projects || [])[0];
                     if (!p) return toast('No projects yet', 'error');
                     var pv = await (await fetch(A + '/api/admin/telegram-preview-project/' + p._id)).json();
-                    document.getElementById('bcText').value = pv.text; document.getElementById('bcPreview').innerHTML = renderMarkdownPreview(pv.text); document.getElementById('bcStatus').textContent = 'Loaded: ' + p.title;
+                    document.getElementById('bcText').value = pv.text;
+                    document.getElementById('bcText').dataset.projectId = p._id;
+                    document.getElementById('bcText').dataset.materialId = ''; document.getElementById('bcPreview').innerHTML = renderMarkdownPreview(pv.text); document.getElementById('bcStatus').textContent = 'Loaded: ' + p.title;
                 } catch (e) { toast('Failed to load', 'error'); }
             });
             lp.dataset.bound = '1';
