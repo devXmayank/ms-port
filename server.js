@@ -136,6 +136,9 @@ const logSchema = new mongoose.Schema({
     meta: mongoose.Schema.Types.Mixed,
     isLocalhost: { type: Boolean, default: false },
     dedupeKey: { type: String, required: true, unique: true },
+    country: { type: String, default: 'Unknown' },
+    city: { type: String, default: 'Unknown' },
+    isp: { type: String, default: 'Unknown' },
     createdAt: { type: Date, default: Date.now },
     ttlAt: { type: Date, required: true }
 });
@@ -167,6 +170,7 @@ function decryptIP(payload) {
         return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString('utf8');
     } catch (e) { return ''; }
 }
+
 function parseUA(ua) {
     const s = String(ua || '');
     let os = 'Unknown';
@@ -174,32 +178,61 @@ function parseUA(ua) {
     else if (/Windows NT 6\.3/.test(s)) os = 'Windows 8.1';
     else if (/Windows NT 6\.1/.test(s)) os = 'Windows 7';
     else if (/Mac OS X/.test(s)) os = 'macOS';
-    else if (/Android/.test(s)) { const m = s.match(/Android\s([\d.]+)/); os = 'Android' + (m ? ' ' + m[1] : ''); }
+    else if (/Android/.test(s)) os = 'Android'; 
     else if (/iPhone|iPad|iPod/.test(s)) { const m = s.match(/OS\s([\d_]+)/); os = 'iOS' + (m ? ' ' + m[1].replace(/_/g, '.') : ''); }
     else if (/Linux/.test(s)) os = 'Linux';
+
     let browser = 'Unknown';
     if (/Edg\//.test(s)) browser = 'Edge';
     else if (/OPR\/|Opera/.test(s)) browser = 'Opera';
     else if (/Chrome\//.test(s) && !/Edg\//.test(s)) { const m = s.match(/Chrome\/([\d]+)/); browser = 'Chrome' + (m ? ' ' + m[1] : ''); }
     else if (/Firefox\//.test(s)) { const m = s.match(/Firefox\/([\d]+)/); browser = 'Firefox' + (m ? ' ' + m[1] : ''); }
     else if (/Safari\//.test(s) && !/Chrome/.test(s)) { const m = s.match(/Version\/([\d.]+)/); browser = 'Safari' + (m ? ' ' + m[1] : ''); }
+    
     let device = 'Desktop';
     if (/iPad|Tablet/i.test(s)) device = 'Tablet';
     else if (/Mobile|iPhone|Android.*Mobile/i.test(s)) device = 'Mobile';
+    
     return { os, browser, device };
 }
+
 function isLocalhostIP(ip) { const s = String(ip || ''); return s === '127.0.0.1' || s === '::1' || s === 'localhost' || s.startsWith('192.168.') || s.startsWith('10.') || s.startsWith('::ffff:127.') || s.startsWith('::ffff:192.168.'); }
+
+function getRealClientIP(req) {
+    const cfIP = req.headers['cf-connecting-ip'];
+    const trueIP = req.headers['true-client-ip'];
+    if (cfIP) return cfIP;
+    if (trueIP) return trueIP;
+    let ip = req.ip || req.connection.remoteAddress || '';
+    return ip.replace(/^::ffff:/, '');
+}
+
+async function getIPDetails(ip) {
+    if (!ip || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('127.') || ip === '::1' || ip.startsWith('::ffff:127.')) {
+        return { country: 'Local', city: 'Local', isp: 'Local' };
+    }
+    try {
+        const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city,isp`);
+        const data = await res.json();
+        if (data.status === 'success') return { country: data.country, city: data.city, isp: data.isp };
+    } catch (e) {}
+    return { country: 'Unknown', city: 'Unknown', isp: 'Unknown' };
+}
 
 async function writeLog(req, type, extra) {
     try {
-        const ipRaw = (req.ip || req.connection.remoteAddress || '').replace(/^::ffff:/, '');
+        const ipRaw = getRealClientIP(req);
         if (!ipRaw) return;
+        
         const ua = req.headers['user-agent'] || '';
         const parsed = parseUA(ua);
+        const geo = await getIPDetails(ipRaw);
+        
         const hourBucket = Math.floor(Date.now() / 3600000);
         const materialIdStr = extra && extra.materialId ? String(extra.materialId) : '';
         const dedupeKey = hashIP(ipRaw + '::' + type + '::' + materialIdStr + '::' + hourBucket);
         const ttlAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
+        
         await Log.create({
             type,
             ipHash: hashIP(ipRaw),
@@ -216,6 +249,9 @@ async function writeLog(req, type, extra) {
             materialId: materialIdStr && mongoose.isValidObjectId(materialIdStr) ? materialIdStr : undefined,
             meta: (extra && extra.meta) || {},
             isLocalhost: isLocalhostIP(ipRaw),
+            country: geo.country,
+            city: geo.city,
+            isp: geo.isp,
             dedupeKey,
             ttlAt
         });
@@ -336,7 +372,6 @@ async function renderCardImage(opts) {
                 <text x="${xPos + 75}" y="${metaY + 25}" text-anchor="middle" font-family="Inter, sans-serif" font-size="14" font-weight="500" fill="#c9a668">${xmlEsc(pill.toUpperCase())}</text>`;
     }).join('');
 
-    // Only show footer text if it's not empty
     const footerBlock = footer ? `<text x="80" y="${H - 180}" font-family="Inter, Arial, sans-serif" font-size="18" fill="#8a8780">${xmlEsc(footer)}</text>` : '';
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -383,6 +418,7 @@ ${logoBase64 ? `<image href="data:image/png;base64,${logoBase64}" x="${W - 180}"
         return null;
     }
 }
+
 async function buildMaterialCard(mat) {
     const cat = mat.category && mat.category.name ? mat.category.name : '';
     const metaParts = [];
@@ -1104,6 +1140,8 @@ app.get('/api/admin/logs', requireAuth, requireVerified, adminLogsLimiter, async
             os: l.os, browser: l.browser, device: l.device,
             lang: l.lang, tz: l.tz, screen: l.screen,
             path: l.path, referrer: l.referrer,
+            country: l.country, // NEW
+            city: l.city, // NEW
             material: l.materialId ? { _id: l.materialId._id, title: l.materialId.title, slug: l.materialId.slug, customPath: l.materialId.customPath } : null,
             isLocalhost: l.isLocalhost,
             createdAt: l.createdAt
@@ -1124,6 +1162,9 @@ app.get('/api/admin/logs/:id', requireAuth, requireVerified, adminLogsLimiter, a
             ua: l.ua, os: l.os, browser: l.browser, device: l.device,
             lang: l.lang, tz: l.tz, screen: l.screen,
             path: l.path, referrer: l.referrer,
+            country: l.country, // NEW
+            city: l.city, // NEW
+            isp: l.isp, // NEW
             material: l.materialId || null,
             meta: l.meta, isLocalhost: l.isLocalhost,
             createdAt: l.createdAt, ttlAt: l.ttlAt
