@@ -152,7 +152,9 @@
                     var typeClass = 'log-type-' + l.type;
                     var time = new Date(l.createdAt).toLocaleString();
                     var mat = l.material ? ' <span style="color:var(--accent);font-size:10px">· ' + esc(l.material.title) + '</span>' : '';
-                    return '<tr data-logid="' + l._id + '"><td><input type="checkbox" class="log-checkbox" data-id="' + l._id + '"' + (logState.selected.has(l._id) ? ' checked' : '') + '></td><td style="font-size:11px">' + time + (l.isLocalhost ? ' <span style="color:var(--yellow);font-size:9px">LOCAL</span>' : '') + '</td><td><span class="' + typeClass + '" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em">' + l.type.replace('_', ' ') + '</span></td><td style="font-family:var(--font-mono);font-size:11px">' + esc(l.ipMasked) + '</td><td style="font-size:11px">' + esc(l.device) + '</td><td style="font-size:11px">' + esc(l.browser) + '</td><td style="font-size:11px">' + esc(l.path || '') + mat + '</td></tr>';
+                    // Shows Country above the device type
+                    var geo = (l.country && l.country !== 'Unknown' && l.country !== 'Local') ? '<span style="color:var(--accent);font-weight:600">' + esc(l.country) + '</span><br>' : '';
+                    return '<tr data-logid="' + l._id + '"><td><input type="checkbox" class="log-checkbox" data-id="' + l._id + '"' + (logState.selected.has(l._id) ? ' checked' : '') + '></td><td style="font-size:11px">' + time + (l.isLocalhost ? ' <span style="color:var(--yellow);font-size:9px">LOCAL</span>' : '') + '</td><td><span class="' + typeClass + '" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em">' + l.type.replace('_', ' ') + '</span></td><td style="font-family:var(--font-mono);font-size:11px">' + esc(l.ipMasked) + '</td><td style="font-size:11px">' + geo + esc(l.device) + '</td><td style="font-size:11px">' + esc(l.browser) + '</td><td style="font-size:11px">' + esc(l.path || '') + mat + '</td></tr>';
                 }).join('')
                 : '<tr class="empty-row"><td colspan="7">No logs yet</td></tr>';
             body.querySelectorAll('.log-checkbox').forEach(function (cb) { cb.addEventListener('change', function () { if (this.checked) logState.selected.add(this.dataset.id); else logState.selected.delete(this.dataset.id); updateLogSelection(); }); });
@@ -199,6 +201,9 @@
                 row('OS', esc(l.os || '—')) +
                 row('Browser', esc(l.browser || '—')) +
                 row('Device', esc(l.device || '—')) +
+                row('Country', '<span style="color:var(--accent);font-weight:600">' + esc(l.country || 'Unknown') + '</span>') +
+                row('City', esc(l.city || 'Unknown')) +
+                row('ISP', esc(l.isp || 'Unknown')) +
                 row('Language', esc(l.lang || '—')) +
                 row('Timezone', esc(l.tz || '—')) +
                 row('Screen', esc(l.screen || '—')) +
