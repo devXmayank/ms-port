@@ -10,7 +10,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/apg.css">
-
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
 
@@ -57,7 +56,7 @@
 
             <div class="flex border-b border-[rgba(255,255,255,0.06)] text-xs font-medium bg-[#1a191e]">
                 <button id="tab-btn-intro" onclick="switchTab('intro')" class="flex-1 py-3 px-2 text-[#8a8780] hover:text-white flex items-center justify-center gap-1.5 transition">
-                    <i class="fa-solid fa-file-invoice"></i> Intro Pages
+                    <i class="fa-solid fa-file-invoice"></i> Intro
                 </button>
                 <button id="tab-btn-records" onclick="switchTab('records')" class="flex-1 py-3 px-2 text-[#c9a668] border-b-2 border-[#c9a668] bg-[#141317] flex items-center justify-center gap-1.5">
                     <i class="fa-solid fa-code"></i> Practicals (<span id="record-count-badge">0</span>)
@@ -70,9 +69,7 @@
                 </button>
             </div>
 
-            <!-- TAB: INTRO PAGES -->
             <div id="tab-intro" class="flex-1 overflow-y-auto p-5 space-y-4 hidden text-xs">
-                <!-- Cover Page Style Selection -->
                 <div class="bg-[#1a191e] p-4 rounded-xl border border-[rgba(255,255,255,0.06)] space-y-3">
                     <h3 class="font-bold text-white text-sm flex items-center gap-2">
                         <i class="fa-solid fa-layer-group text-[#c9a668]"></i> Cover Page Style
@@ -99,7 +96,6 @@
                     </div>
                 </div>
 
-                <!-- Certificate Style Selection -->
                 <div class="bg-[#1a191e] p-4 rounded-xl border border-[rgba(255,255,255,0.06)] space-y-3">
                     <h3 class="font-bold text-white text-sm flex items-center gap-2">
                         <i class="fa-solid fa-certificate text-[#c9a668]"></i> Certificate Style
@@ -126,7 +122,6 @@
                     </div>
                 </div>
 
-                <!-- Acknowledgement Style Selection -->
                 <div class="bg-[#1a191e] p-4 rounded-xl border border-[rgba(255,255,255,0.06)] space-y-3">
                     <h3 class="font-bold text-white text-sm flex items-center gap-2">
                         <i class="fa-solid fa-handshake text-[#c9a668]"></i> Acknowledgement Style
@@ -147,7 +142,6 @@
                     </div>
                 </div>
 
-                <!-- Toggle Pages -->
                 <div class="bg-[#1a191e] p-4 rounded-xl border border-[rgba(255,255,255,0.06)] space-y-3">
                     <h3 class="font-bold text-white text-sm flex items-center gap-2">
                         <i class="fa-solid fa-toggle-on text-[#c9a668]"></i> Include / Exclude Pages
@@ -167,7 +161,6 @@
                 </div>
             </div>
 
-            <!-- TAB: RECORDS -->
             <div id="tab-records" class="flex-1 overflow-y-auto p-5 space-y-4">
                 <div class="text-xs text-[#8a8780] bg-[#1a191e] p-3 rounded-xl border border-[rgba(255,255,255,0.06)] flex justify-between items-center">
                     <span>Manage Python scripts & Orange workflows.</span>
@@ -176,20 +169,21 @@
                 <div id="records-editor-list" class="space-y-4"></div>
             </div>
 
-            <!-- TAB: LAYOUT -->
             <div id="tab-layout" class="flex-1 overflow-y-auto p-5 space-y-5 hidden text-xs">
                 <div class="bg-[rgba(201,166,104,0.05)] border border-[rgba(201,166,104,0.2)] p-3.5 rounded-xl text-amber-200 leading-relaxed flex items-start gap-2.5">
-                    <i class="fa-solid fa-piggy-bank text-[#c9a668] text-base mt-0.5"></i>
-                    <div><strong>Paper & Cost Optimization:</strong> Set high-density packing (2 or 3 records per page) and adjust maximum image heights to reduce page count for printing.</div>
+                    <i class="fa-solid fa-scissors text-[#c9a668] text-base mt-0.5"></i>
+                    <div><strong>Smart Page Flow:</strong> "Tab-wise Split" mode automatically breaks long records — if code + data image don't fit, the output section continues on the next page. No more cut-off images.</div>
                 </div>
 
                 <div class="space-y-2">
-                    <label class="block font-semibold text-slate-300">Items Per Page Density</label>
-                    <select id="setting-density" onchange="updateLayoutSettings()" class="w-full bg-[#1a191e] border border-[rgba(255,255,255,0.06)] rounded-xl p-2.5 text-white outline-none focus:border-[#c9a668]">
-                        <option value="1">1 Record per page (Spacious)</option>
-                        <option value="2" selected>2 Records per page (Recommended Compact)</option>
-                        <option value="3">3 Records per page (Ultra High Density)</option>
+                    <label class="block font-semibold text-slate-300">Layout Mode</label>
+                    <select id="setting-layout-mode" onchange="updateLayoutSettings()" class="w-full bg-[#1a191e] border border-[rgba(255,255,255,0.06)] rounded-xl p-2.5 text-white outline-none focus:border-[#c9a668]">
+                        <option value="tabwise" selected>Tab-wise Split (Smart — no cutting)</option>
+                        <option value="density1">1 Record per page (Spacious)</option>
+                        <option value="density2">2 Records per page (Compact)</option>
+                        <option value="density3">3 Records per page (Ultra Compact)</option>
                     </select>
+                    <p class="text-[10px] text-slate-500 leading-snug">Tab-wise mode splits each record into sections (Question / Code / Output). Sections flow to the next page if they don't fit — perfect for large screenshots.</p>
                 </div>
 
                 <div class="space-y-2">
@@ -223,7 +217,6 @@
                 </div>
             </div>
 
-            <!-- TAB: META -->
             <div id="tab-meta" class="flex-1 overflow-y-auto p-5 space-y-3.5 hidden text-xs">
                 <div>
                     <label class="block text-[#8a8780] mb-1">Student Full Name</label>
@@ -263,7 +256,6 @@
 
     </div>
 
-    <!-- PRESET MODAL -->
     <div id="preset-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden no-print">
         <div class="bg-[#141317] border border-[rgba(255,255,255,0.1)] rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
             <div class="p-5 border-b border-[rgba(255,255,255,0.06)] flex justify-between items-center bg-[#1a191e]">
