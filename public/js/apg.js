@@ -672,7 +672,7 @@ function renderDocumentPreview() {
                 <div class="flex-1 flex flex-col justify-between">
                     <div class="space-y-6">
                         <h2 class="text-xl font-bold text-center underline uppercase tracking-wider">Certificate of Authenticity</h2>
-                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of class <strong>${escapeHtml(state.meta.className)}</strong> bearing CBSE Roll Number <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the practical coursework and project file requirements for <strong>Artificial Intelligence (Subject Code 417)</strong> as prescribed by the Central Board of Secondary Education (CBSE) for the academic session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
+                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of class <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll Number <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the practical coursework and project file requirements for <strong>Artificial Intelligence (Subject Code 417)</strong> as prescribed by the Central Board of Secondary Education (CBSE) for the academic session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
                         <p>All Python data science programs and Orange tool predictive workflows contained in this record file represent authentic, original work executed by the student under supervision.</p>
                         <div class="grid grid-cols-2 gap-10 pt-24 text-center text-xs font-sans">
                             <div><p class="border-t border-black pt-2 font-bold">Internal / Teacher Signature</p></div>
@@ -719,7 +719,7 @@ function renderDocumentPreview() {
                         <p>I am also thankful to my parents and fellow classmates for their helpful suggestions and support while compiling these practical records.</p>
                         <div class="text-right pt-12 font-sans text-xs">
                             <p class="font-bold">${escapeHtml(state.meta.name)}</p>
-                            <p>CBSE Roll No: ${escapeHtml(state.meta.roll)}</p>
+                            <p>Roll No: ${escapeHtml(state.meta.roll)}</p>
                         </div>
                     </div>
                 </div>
