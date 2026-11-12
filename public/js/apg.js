@@ -1,10 +1,10 @@
 let state = {
     meta: {
-        name: "Mayank Sagar",
-        roll: "12654321",
-        className: "Class XII - Science (A)",
-        school: "Public Central School, Agra",
-        teacher: "Mrs. Sunita Verma",
+        name: "-",
+        roll: "-",
+        className: "Class XII - Science (B)",
+        school: "New St. Stephen Public School, Agra",
+        teacher: "Mr. Ashan Ali Sir",
         session: "2026 - 2027"
     },
     intro: {
@@ -550,7 +550,7 @@ function renderDocumentPreview() {
                     <div>
                         <span class="text-xs font-bold font-sans tracking-widest uppercase bg-black text-white px-2 py-1">CBSE CLASS XII</span>
                         <h1 class="text-3xl font-extrabold uppercase mt-6 tracking-wide">ARTIFICIAL INTELLIGENCE</h1>
-                        <p class="text-sm font-sans font-semibold text-gray-700 mt-1">SUBJECT CODE 417 • PRACTICAL FILE</p>
+                        <p class="text-sm font-sans font-semibold text-gray-700 mt-1">SUBJECT CODE 843 • PRACTICAL FILE</p>
                     </div>
                     <div class="my-auto py-12">
                         <p class="text-xs uppercase tracking-widest text-gray-500 font-sans">Academic Session</p>
@@ -581,7 +581,7 @@ function renderDocumentPreview() {
                     </div>
                     <div class="my-auto py-8">
                         <h1 class="text-3xl font-bold uppercase underline tracking-wider">PROJECT RECORD FILE</h1>
-                        <p class="text-base font-semibold mt-2">ARTIFICIAL INTELLIGENCE (CODE 417)</p>
+                        <p class="text-base font-semibold mt-2">ARTIFICIAL INTELLIGENCE (CODE 843)</p>
                         <p class="text-xs italic text-gray-600 mt-4">Session: ${escapeHtml(state.meta.session)}</p>
                     </div>
                     <div class="grid grid-cols-2 text-left text-xs font-sans border-t border-black pt-4">
@@ -607,7 +607,7 @@ function renderDocumentPreview() {
                     <div class="my-auto py-8 space-y-3">
                         <div class="border-y-2 border-black py-5">
                             <h1 class="text-2xl font-extrabold tracking-wide uppercase">ARTIFICIAL INTELLIGENCE</h1>
-                            <p class="text-xs font-semibold tracking-widest mt-1">SUBJECT CODE: 417 • PRACTICAL FILE</p>
+                            <p class="text-xs font-semibold tracking-widest mt-1">SUBJECT CODE: 843 • PRACTICAL FILE</p>
                         </div>
                         <p class="text-xs italic text-gray-600">A Practical Record File on Data Science with Python & Orange Data Mining Tool</p>
                     </div>
@@ -644,7 +644,7 @@ function renderDocumentPreview() {
                     <div class="border-4 border-double border-black p-6 h-full flex flex-col justify-between">
                         <div class="space-y-5">
                             <h2 class="text-2xl font-bold text-center uppercase tracking-wider">Certificate of Excellence</h2>
-                            <p class="mt-6">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll No <strong>${escapeHtml(state.meta.roll)}</strong>, has completed the AI (417) practical project for session <strong>${escapeHtml(state.meta.session)}</strong> with distinction.</p>
+                            <p class="mt-6">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll No <strong>${escapeHtml(state.meta.roll)}</strong>, has completed the AI (843) practical project for session <strong>${escapeHtml(state.meta.session)}</strong> with distinction.</p>
                             <p>All Python programs and Orange workflows have been verified and found satisfactory.</p>
                             <div class="grid grid-cols-2 gap-10 pt-20 text-center text-xs font-sans">
                                 <div><p class="border-t border-black pt-2 font-bold">Teacher's Signature</p></div>
@@ -659,7 +659,7 @@ function renderDocumentPreview() {
                 <div class="flex-1 flex flex-col justify-between">
                     <div class="space-y-6 pt-10">
                         <h2 class="text-xl font-bold text-center uppercase tracking-wider">Certificate</h2>
-                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong> of <strong>${escapeHtml(state.meta.className)}</strong>, Roll No <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the AI (417) project file for session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
+                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong> of <strong>${escapeHtml(state.meta.className)}</strong>, Roll No <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the AI (843) project file for session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
                         <div class="grid grid-cols-2 gap-10 pt-24 text-center text-xs font-sans">
                             <div><p class="border-t border-gray-400 pt-2">Teacher</p></div>
                             <div><p class="border-t border-gray-400 pt-2">Examiner</p></div>
@@ -672,7 +672,7 @@ function renderDocumentPreview() {
                 <div class="flex-1 flex flex-col justify-between">
                     <div class="space-y-6">
                         <h2 class="text-xl font-bold text-center underline uppercase tracking-wider">Certificate of Authenticity</h2>
-                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of class <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll Number <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the practical coursework and project file requirements for <strong>Artificial Intelligence (Subject Code 417)</strong> as prescribed by the Central Board of Secondary Education (CBSE) for the academic session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
+                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of class <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll Number <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the practical coursework and project file requirements for <strong>Artificial Intelligence (Subject Code 843)</strong> as prescribed by the Central Board of Secondary Education (CBSE) for the academic session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
                         <p>All Python data science programs and Orange tool predictive workflows contained in this record file represent authentic, original work executed by the student under supervision.</p>
                         <div class="grid grid-cols-2 gap-10 pt-24 text-center text-xs font-sans">
                             <div><p class="border-t border-black pt-2 font-bold">Internal / Teacher Signature</p></div>
@@ -785,7 +785,7 @@ function renderDocumentPreview() {
             pageEl.style.fontSize = `${state.layout.fontSize}pt`;
             pageEl.innerHTML = `
                 <div class="space-y-2 flex-1">${currentPageBlocks.join('')}</div>
-                ${state.layout.showHeaders ? `<div class="text-[8pt] text-gray-500 border-t border-gray-300 pt-1.5 flex justify-between"><span>Subject Code 417 • AI Project File</span><span>Page ${currentPageNum}</span></div>` : ''}
+                ${state.layout.showHeaders ? `<div class="text-[8pt] text-gray-500 border-t border-gray-300 pt-1.5 flex justify-between"><span>Subject Code 843 • AI Project File</span><span>Page ${currentPageNum}</span></div>` : ''}
             `;
             container.appendChild(pageEl);
             currentPageNum++;
@@ -905,7 +905,7 @@ function renderDocumentPreview() {
             chunkHTML += `</div>`;
             pageEl.innerHTML = `
                 ${chunkHTML}
-                ${state.layout.showHeaders ? `<div class="text-[8pt] text-gray-500 border-t border-gray-300 pt-1.5 flex justify-between"><span>Subject Code 417 • AI Project File</span><span>Page ${currentPageNum}</span></div>` : ''}
+                ${state.layout.showHeaders ? `<div class="text-[8pt] text-gray-500 border-t border-gray-300 pt-1.5 flex justify-between"><span>Subject Code 843 • AI Project File</span><span>Page ${currentPageNum}</span></div>` : ''}
             `;
             container.appendChild(pageEl);
             currentPageNum++;
@@ -1067,7 +1067,7 @@ document.addEventListener('DOMContentLoaded', function () {
         pages.filter(pg => pg.length).forEach((pg, pi) => {
             const el = document.createElement('div');
             el.className = 'a4-page rec-page'; el.dataset.rec = '1';
-            el.innerHTML = `<div class="page-body">${pg.map((it, k) => `<div data-r="${it.b.rec}" style="margin-top:${k ? it.gap : 0}px">${it.html}</div>`).join('')}</div>${foot('Subject Code 417 • AI Project File', startNum + pi)}`;
+            el.innerHTML = `<div class="page-body">${pg.map((it, k) => `<div data-r="${it.b.rec}" style="margin-top:${k ? it.gap : 0}px">${it.html}</div>`).join('')}</div>${foot('Subject Code 843 • AI Project File', startNum + pi)}`;
             container.appendChild(el);
         });
 
@@ -1081,7 +1081,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (!next) {
                 next = document.createElement('div');
                 next.className = 'a4-page rec-page'; next.dataset.rec = '1';
-                next.innerHTML = `<div class="page-body"></div>${foot('Subject Code 417 • AI Project File', 0)}`;
+                next.innerHTML = `<div class="page-body"></div>${foot('Subject Code 843 • AI Project File', 0)}`;
                 els[bad].after(next);
             }
             const mv = body.lastElementChild;
