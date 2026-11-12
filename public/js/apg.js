@@ -4,7 +4,7 @@ let state = {
         roll: "-",
         className: "Class XII - Science (B)",
         school: "New St. Stephen Public School, Agra",
-        teacher: "Mr. Ashan Ali Sir",
+        teacher: "Mr. Ashan Ali",
         session: "2026 - 2027"
     },
     intro: {

@@ -4,7 +4,7 @@ let state = {
         roll: "-",
         className: "Class XII - Science (B)",
         school: "New St. Stephen Public School, Agra",
-        teacher: "Mr. Ashan Ali Sir",
+        teacher: "Mr. Ashan Ali",
         session: "2026 - 2027"
     },
     intro: {
@@ -614,7 +614,7 @@ function renderDocumentPreview() {
                         <div class="text-right">
                             <p class="font-bold text-gray-500 text-[10px] uppercase">Evaluated By:</p>
                             <p class="font-bold text-sm">${escapeHtml(state.meta.teacher)}</p>
-                            <p>Department of Computer Science</p>
+                            <p>Department of Computer Science & AI</p>
                         </div>
                     </div>
                 </div>
@@ -669,7 +669,7 @@ function renderDocumentPreview() {
                         <div class="text-right">
                             <p class="font-bold uppercase text-gray-500 text-[9pt]">Submitted To:</p>
                             <p><strong>Evaluator:</strong> ${escapeHtml(state.meta.teacher)}</p>
-                            <p>Department of Computer Science</p>
+                            <p>Department of Computer Science & AI</p>
                         </div>
                     </div>
                 </div>
