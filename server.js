@@ -1280,7 +1280,7 @@ app.get('/about', (req, res) => res.sendFile(path.join(__dirname, 'public', 'abo
 app.get('/contact', (req, res) => res.sendFile(path.join(__dirname, 'public', 'contact.html')));
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 app.get('/ai-project-generator', (req, res) => res.sendFile(path.join(__dirname, 'public', 'ai-project-generator.html')));
-
+app.get('/cs-project-generator', (req, res) => res.sendFile(path.join(__dirname, 'public', 'cs-project-generator.html')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
