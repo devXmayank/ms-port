@@ -515,13 +515,8 @@ function escapeHtml(str) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-/* =====================================================================
-   INTRO PAGES  (Cover • Certificate • Acknowledgement • Index)
-   - School logo is loaded from LOGO_SRC (falls back through LOGO_FALLBACKS)
-   - Every page is built as a full-height flex column so it fills the A4 sheet
-   ===================================================================== */
-const LOGO_SRC = '/assests/logo.png';
-const LOGO_FALLBACKS = ['assests/logo.png', './assests/logo.png', '/assets/logo.png', 'assets/logo.png'];
+const LOGO_SRC = '/assets/logo.png';
+const LOGO_FALLBACKS = ['assets/logo.png', './assets/logo.png'];
 const INTRO_SUBJECT = {
     name: 'ARTIFICIAL INTELLIGENCE', title: 'Artificial Intelligence', code: '843',
     tagline: 'A Practical Record File on Data Science with Python &amp; Orange Data Mining Tool',
@@ -536,7 +531,19 @@ function logoFallback(img) {
 }
 window.logoFallback = logoFallback;
 
-/* Logo inside a fixed square-ish box so layouts never shift if the image is missing */
+(function () { const pre = new Image(); pre.src = LOGO_SRC; })();
+
+function waitForImages(timeout) {
+    const imgs = Array.from(document.querySelectorAll('#a4-document-container img'));
+    const jobs = imgs.map(img => img.complete && img.naturalWidth > 0 ? Promise.resolve() : new Promise(res => {
+        img.addEventListener('load', () => res());
+        img.addEventListener('error', () => { if (parseInt(img.dataset.fb || '0', 10) >= LOGO_FALLBACKS.length) res(); });
+        if (img.complete && img.naturalWidth === 0 && parseInt(img.dataset.fb || '0', 10) >= LOGO_FALLBACKS.length) res();
+    }));
+    return Promise.race([Promise.all(jobs), new Promise(res => setTimeout(res, timeout || 4000))])
+        .then(() => new Promise(res => requestAnimationFrame(() => setTimeout(res, 100))));
+}
+
 function logoBox(mm, extra) {
     return `<div style="width:${mm}mm;height:${mm}mm;flex:0 0 auto;display:flex;align-items:center;justify-content:center;${extra || ''}">
         <img src="${LOGO_SRC}" alt="School Logo" data-fb="0" onerror="logoFallback(this)"
@@ -556,7 +563,6 @@ function makeIntroPage(inner, footerHTML, extraClass) {
     return el;
 }
 
-/* ------------------------------ COVER ------------------------------ */
 function buildCoverPage() {
     const m = state.meta, S = INTRO_SUBJECT, e = escapeHtml;
     const style = state.intro.coverStyle || 'classic';
@@ -648,7 +654,6 @@ function buildCoverPage() {
     return makeIntroPage(inner, '');
 }
 
-/* ---------------------------- CERTIFICATE ---------------------------- */
 function sigBlock(labels, borderColor) {
     return `<div style="display:grid;grid-template-columns:repeat(${labels.length},1fr);gap:12mm;text-align:center;font:600 9.5pt 'Inter',Arial,sans-serif;">
         ${labels.map(l => `<div><div style="height:16mm;"></div><div style="border-top:1.5px solid ${borderColor || '#000'};padding-top:2mm;">${l}</div></div>`).join('')}</div>`;
@@ -662,7 +667,7 @@ function remarksBlock() {
 function buildCertPage(pageNum) {
     const m = state.meta, S = INTRO_SUBJECT, e = escapeHtml;
     const cStyle = state.intro.certStyle || 'classic';
-    const fs = (state.layout.fontSize || 10) + 3;          // body size follows the Layout slider
+    const fs = (state.layout.fontSize || 10) + 3;
     const p = `font-size:${fs}pt;line-height:2.1;text-align:justify;`;
     const dets = remarksBlock();
     const dateLine = `<div style="display:flex;justify-content:space-between;font:600 10.5pt 'Inter',Arial,sans-serif;"><span>Date: ______________</span></div>`;
@@ -721,7 +726,6 @@ function buildCertPage(pageNum) {
     return makeIntroPage(inner, introFooter('Certificate', pageNum));
 }
 
-/* -------------------------- ACKNOWLEDGEMENT -------------------------- */
 function buildAckPage(pageNum) {
     const m = state.meta, S = INTRO_SUBJECT, e = escapeHtml;
     const aStyle = state.intro.ackStyle || 'classic';
@@ -766,10 +770,6 @@ function buildAckPage(pageNum) {
     return makeIntroPage(inner, introFooter('Acknowledgement', pageNum));
 }
 
-/* ------------------------------- INDEX ------------------------------- */
-/* Always ONE page. Row size / font shrink with the number of records, and
-   with many records the list flows into two columns. Short lists are padded
-   with blank ruled rows so the table fills the sheet. */
 function buildIndexPageEl(rows, pageNum) {
     const e = escapeHtml, n = rows.length;
     const cols = n > 36 ? 2 : 1;
@@ -1173,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     window.renderDocumentPreview = function () { clearTimeout(timer); timer = setTimeout(run, 120); };
-    window.triggerPrint = function () { clearTimeout(timer); run().then(() => window.print()); };
+    window.triggerPrint = function () { clearTimeout(timer); run().then(() => waitForImages()).then(() => window.print()); };
     window.addEventListener('resize', fitZoom);
 
     const prevOnload = window.onload;
