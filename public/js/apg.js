@@ -773,7 +773,8 @@ function buildAckPage(pageNum) {
 function buildIndexPageEl(rows, pageNum) {
     const e = escapeHtml, n = rows.length;
     const cols = n > 36 ? 2 : 1;
-    const perCol = Math.max(cols === 1 ? 20 : 0, Math.ceil(n / cols));
+    const perCol = Math.max(1, Math.ceil(n / cols));
+    const rowH = Math.min(14, 226 / perCol);
     const fsz = cols === 2 ? (perCol > 44 ? 6.5 : perCol > 38 ? 7 : 7.5)
               : n <= 22 ? 10.5 : n <= 28 ? 9.5 : 8.5;
     const padV = cols === 2 ? 0.6 : n <= 22 ? 2 : 1;
@@ -791,11 +792,11 @@ function buildIndexPageEl(rows, pageNum) {
         }
         const widths = cols === 1 ? '<col style="width:14mm"><col><col style="width:28mm"><col style="width:22mm">'
                                   : '<col style="width:9mm"><col><col style="width:12mm">';
-        return `<table style="width:100%;height:100%;border-collapse:collapse;table-layout:fixed;border:1.5px solid #000;color:#000;font-size:${fsz}pt;line-height:1.2;">
+        return `<table style="width:100%;border-collapse:collapse;table-layout:fixed;border:1.5px solid #000;color:#000;font-size:${fsz}pt;line-height:1.2;">
             <colgroup>${widths}</colgroup>
             <thead><tr style="background:#e5e7eb;font-size:${Math.min(fsz, 9)}pt;text-transform:uppercase;border-bottom:1.5px solid #000;height:9mm;">
                 <th style="${th}">S.No</th><th style="${th}text-align:left;">Practical / Task Description</th>${cols === 1 ? `<th style="${th}">Tool</th>` : ''}<th style="padding:2mm;">Page</th></tr></thead>
-            <tbody>${body.join('')}</tbody></table>`;
+            <tbody>${body.join('').replace(/<tr>/g, `<tr style="height:${rowH.toFixed(2)}mm;">`)}</tbody></table>`;
     };
 
     const tables = [];
@@ -807,7 +808,7 @@ function buildIndexPageEl(rows, pageNum) {
     el.innerHTML = `
         <div class="page-body" style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;">
             <h2 style="font:700 20pt/1.2 ${SERIF};text-align:center;text-decoration:underline;text-transform:uppercase;letter-spacing:.12em;margin:2mm 0 8mm;">Practical Index Sheet</h2>
-            <div style="flex:1;min-height:0;display:flex;gap:5mm;">${tables.join('')}</div>
+            <div style="flex:1;min-height:0;display:flex;gap:5mm;align-items:flex-start;">${tables.join('')}</div>
         </div>
         ${introFooter('Index', pageNum)}`;
     return el;
