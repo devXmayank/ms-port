@@ -515,6 +515,304 @@ function escapeHtml(str) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+/* =====================================================================
+   INTRO PAGES  (Cover • Certificate • Acknowledgement • Index)
+   - School logo is loaded from LOGO_SRC (falls back through LOGO_FALLBACKS)
+   - Every page is built as a full-height flex column so it fills the A4 sheet
+   ===================================================================== */
+const LOGO_SRC = '/assests/logo.png';
+const LOGO_FALLBACKS = ['assests/logo.png', './assests/logo.png', '/assets/logo.png', 'assets/logo.png'];
+const INTRO_SUBJECT = {
+    name: 'ARTIFICIAL INTELLIGENCE', title: 'Artificial Intelligence', code: '843',
+    tagline: 'A Practical Record File on Data Science with Python &amp; Orange Data Mining Tool',
+    verified: 'All Python programs and Orange Data Mining workflows contained in this file have been verified and found satisfactory.'
+};
+const SERIF = "'Times New Roman', Times, serif";
+
+function logoFallback(img) {
+    const i = parseInt(img.dataset.fb || '0', 10);
+    if (i < LOGO_FALLBACKS.length) { img.dataset.fb = String(i + 1); img.src = LOGO_FALLBACKS[i]; }
+    else { img.style.visibility = 'hidden'; }
+}
+window.logoFallback = logoFallback;
+
+/* Logo inside a fixed square-ish box so layouts never shift if the image is missing */
+function logoBox(mm, extra) {
+    return `<div style="width:${mm}mm;height:${mm}mm;flex:0 0 auto;display:flex;align-items:center;justify-content:center;${extra || ''}">
+        <img src="${LOGO_SRC}" alt="School Logo" data-fb="0" onerror="logoFallback(this)"
+             style="max-width:100%;max-height:100%;object-fit:contain;display:block;"></div>`;
+}
+
+function introFooter(label, pageNum) {
+    return state.layout.showHeaders
+        ? `<div class="page-footer" style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #9ca3af;padding:2.5mm 0 1mm;margin-top:6mm;min-height:9mm;box-sizing:border-box;font:500 9.5pt/1.4 'Inter',Arial,sans-serif;color:#374151;"><span>${label}</span><span>Page ${pageNum}</span></div>`
+        : '';
+}
+
+function makeIntroPage(inner, footerHTML, extraClass) {
+    const el = document.createElement('div');
+    el.className = 'a4-page font-serif-doc ' + (extraClass || '');
+    el.innerHTML = inner + (footerHTML || '');
+    return el;
+}
+
+/* ------------------------------ COVER ------------------------------ */
+function buildCoverPage() {
+    const m = state.meta, S = INTRO_SUBJECT, e = escapeHtml;
+    const style = state.intro.coverStyle || 'classic';
+    const sans = "font-family:'Inter',Arial,sans-serif;";
+    let inner = '';
+
+    if (style === 'modern') {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;border-left:10px solid #000;padding:2mm 0 0 10mm;min-height:0;">
+            <div style="display:flex;align-items:center;gap:6mm;padding-bottom:6mm;border-bottom:1px solid #000;">
+                ${logoBox(30)}
+                <div>
+                    <div style="font:800 17pt/1.2 ${SERIF};text-transform:uppercase;letter-spacing:.04em;">${e(m.school)}</div>
+                    <div style="${sans}font-size:9pt;color:#4b5563;margin-top:1.5mm;letter-spacing:.05em;">Affiliated to Central Board of Secondary Education (CBSE)</div>
+                </div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+                <span style="${sans}align-self:flex-start;font-size:9pt;font-weight:700;letter-spacing:.2em;text-transform:uppercase;background:#000;color:#fff;padding:2mm 4mm;">CBSE Class XII</span>
+                <h1 style="font:800 32pt/1.1 ${SERIF};text-transform:uppercase;letter-spacing:.02em;margin:9mm 0 3mm;">${S.name}</h1>
+                <p style="${sans}font-size:12pt;font-weight:600;color:#374151;">SUBJECT CODE ${S.code} &bull; PRACTICAL FILE</p>
+                <p style="font:italic 11pt/1.5 ${SERIF};color:#4b5563;margin-top:6mm;max-width:130mm;">${S.tagline}</p>
+                <div style="margin-top:14mm;">
+                    <p style="${sans}font-size:8.5pt;text-transform:uppercase;letter-spacing:.2em;color:#6b7280;">Academic Session</p>
+                    <p style="${sans}font-size:20pt;font-weight:700;margin-top:1mm;">${e(m.session)}</p>
+                </div>
+            </div>
+            <div style="${sans}display:grid;grid-template-columns:1fr 1fr;gap:8mm;border-top:2px solid #000;padding:6mm 0 4mm;font-size:10.5pt;line-height:1.6;">
+                <div>
+                    <p style="font-size:8.5pt;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.1em;">Submitted By</p>
+                    <p style="font-size:14pt;font-weight:700;margin:1mm 0;">${e(m.name)}</p>
+                    <p>Roll No: ${e(m.roll)}</p><p>${e(m.className)}</p><p>${e(m.school)}</p>
+                </div>
+                <div style="text-align:right;">
+                    <p style="font-size:8.5pt;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.1em;">Evaluated By</p>
+                    <p style="font-size:14pt;font-weight:700;margin:1mm 0;">${e(m.teacher)}</p>
+                    <p>Department of Computer Science &amp; AI</p>
+                </div>
+            </div>
+        </div>`;
+    } else if (style === 'formal') {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;border:1.5px solid #000;padding:12mm 12mm 10mm;text-align:center;min-height:0;">
+            <div>
+                <div style="display:flex;justify-content:center;">${logoBox(42)}</div>
+                <h3 style="font:700 17pt/1.25 ${SERIF};text-transform:uppercase;letter-spacing:.08em;margin-top:6mm;">${e(m.school)}</h3>
+                <p style="${sans}font-size:9.5pt;color:#4b5563;margin-top:2mm;">Affiliated to Central Board of Secondary Education (CBSE)</p>
+                <div style="width:40mm;border-top:2px solid #000;margin:7mm auto 0;"></div>
+            </div>
+            <div>
+                <h1 style="font:700 30pt/1.2 ${SERIF};text-transform:uppercase;text-decoration:underline;letter-spacing:.06em;">Project Record File</h1>
+                <p style="font:600 17pt/1.3 ${SERIF};margin-top:6mm;">${S.name} (CODE ${S.code})</p>
+                <p style="font:italic 11pt/1.5 ${SERIF};color:#4b5563;margin:5mm auto 0;max-width:135mm;">${S.tagline}</p>
+                <p style="${sans}font-size:11pt;margin-top:8mm;"><strong>Session:</strong> ${e(m.session)}</p>
+            </div>
+            <div style="${sans}display:grid;grid-template-columns:1fr 1fr;gap:6mm;text-align:left;font-size:11pt;line-height:1.9;border-top:1.5px solid #000;padding-top:6mm;">
+                <div><p><strong>Name:</strong> ${e(m.name)}</p><p><strong>Roll No:</strong> ${e(m.roll)}</p><p><strong>Class:</strong> ${e(m.className)}</p></div>
+                <div style="text-align:right;"><p><strong>Teacher In-Charge:</strong></p><p>${e(m.teacher)}</p><p>Department of Computer Science &amp; AI</p></div>
+            </div>
+        </div>`;
+    } else {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;border:5px double #000;padding:10mm 10mm 8mm;text-align:center;min-height:0;">
+            <div>
+                <div style="display:flex;justify-content:center;">${logoBox(40)}</div>
+                <h2 style="font:700 18pt/1.25 ${SERIF};text-transform:uppercase;letter-spacing:.07em;margin-top:5mm;">${e(m.school)}</h2>
+                <p style="${sans}font-size:9pt;text-transform:uppercase;letter-spacing:.14em;color:#4b5563;margin-top:2mm;">Central Board of Secondary Education &bull; Session ${e(m.session)}</p>
+            </div>
+            <div>
+                <p style="${sans}font-size:10pt;letter-spacing:.3em;text-transform:uppercase;color:#6b7280;margin-bottom:5mm;">Practical Record File</p>
+                <div style="border-top:3px solid #000;border-bottom:3px solid #000;padding:9mm 4mm;">
+                    <h1 style="font:800 30pt/1.15 ${SERIF};letter-spacing:.05em;text-transform:uppercase;">${S.name}</h1>
+                    <p style="${sans}font-size:11pt;font-weight:600;letter-spacing:.22em;margin-top:4mm;">SUBJECT CODE: ${S.code}</p>
+                </div>
+                <p style="font:italic 11.5pt/1.6 ${SERIF};color:#4b5563;margin:6mm auto 0;max-width:140mm;">${S.tagline}</p>
+            </div>
+            <div style="${sans}display:grid;grid-template-columns:1fr 1fr;gap:8mm;text-align:left;font-size:10.5pt;line-height:1.85;border-top:1.5px solid #000;padding-top:5mm;">
+                <div>
+                    <p style="font-size:9pt;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.1em;">Submitted By</p>
+                    <p><strong>Name:</strong> ${e(m.name)}</p><p><strong>Roll No:</strong> ${e(m.roll)}</p>
+                    <p><strong>Class:</strong> ${e(m.className)}</p><p><strong>School:</strong> ${e(m.school)}</p>
+                </div>
+                <div style="text-align:right;">
+                    <p style="font-size:9pt;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.1em;">Submitted To</p>
+                    <p><strong>Evaluator:</strong> ${e(m.teacher)}</p><p>Department of Computer Science &amp; AI</p>
+                </div>
+            </div>
+        </div>`;
+    }
+    return makeIntroPage(inner, '');
+}
+
+/* ---------------------------- CERTIFICATE ---------------------------- */
+function sigBlock(labels, borderColor) {
+    return `<div style="display:grid;grid-template-columns:repeat(${labels.length},1fr);gap:12mm;text-align:center;font:600 9.5pt 'Inter',Arial,sans-serif;">
+        ${labels.map(l => `<div><div style="height:16mm;"></div><div style="border-top:1.5px solid ${borderColor || '#000'};padding-top:2mm;">${l}</div></div>`).join('')}</div>`;
+}
+
+function remarksBlock() {
+    const line = '<div style="border-bottom:1px solid #6b7280;height:9mm;"></div>';
+    return `<div style="font:600 10.5pt 'Inter',Arial,sans-serif;"><div>Remarks:</div>${line}${line}</div>`;
+}
+
+function buildCertPage(pageNum) {
+    const m = state.meta, S = INTRO_SUBJECT, e = escapeHtml;
+    const cStyle = state.intro.certStyle || 'classic';
+    const fs = (state.layout.fontSize || 10) + 3;          // body size follows the Layout slider
+    const p = `font-size:${fs}pt;line-height:2.1;text-align:justify;`;
+    const dets = remarksBlock();
+    const dateLine = `<div style="display:flex;justify-content:space-between;font:600 10.5pt 'Inter',Arial,sans-serif;"><span>Date: ______________</span></div>`;
+    let inner = '';
+
+    if (cStyle === 'ornate') {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;border:5px double #000;padding:8mm 10mm;min-height:0;">
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0;padding:3mm 0;">
+                <div style="text-align:center;">
+                    <h2 style="font:800 26pt/1.2 ${SERIF};text-transform:uppercase;letter-spacing:.12em;">Certificate</h2>
+                    <div style="font:italic 13pt ${SERIF};color:#4b5563;margin-top:1mm;">of Excellence</div>
+                    <div style="width:55mm;border-top:2px solid #000;margin:4mm auto 0;"></div>
+                </div>
+                <div>
+                    <p style="${p}">This is to certify that <strong>${e(m.name)}</strong>, a student of <strong>${e(m.className)}</strong> bearing Roll No <strong>${e(m.roll)}</strong>, has successfully completed the practical project file of <strong>${S.title} (Code ${S.code})</strong> for the academic session <strong>${e(m.session)}</strong> with distinction.</p>
+                    <p style="${p}margin-top:3mm;">${S.verified} The work was carried out with sincerity, dedication and discipline, and is hereby found to be of a very satisfactory standard.</p>
+                    <p style="${p}margin-top:3mm;">The student has shown regular attendance and a thorough understanding of the subject during the practical sessions.</p>
+                </div>
+                ${dets}
+                ${dateLine}
+            </div>
+            ${sigBlock(["Teacher's Signature", 'External Examiner'])}
+        </div>`;
+    } else if (cStyle === 'minimal') {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0;padding:4mm 0;">
+                <h2 style="font:700 22pt/1.2 ${SERIF};text-transform:uppercase;letter-spacing:.2em;text-align:center;">Certificate</h2>
+                <div>
+                    <p style="${p}">This is to certify that <strong>${e(m.name)}</strong> of <strong>${e(m.className)}</strong>, Roll No <strong>${e(m.roll)}</strong>, has successfully completed the ${S.title} (${S.code}) project file for the session <strong>${e(m.session)}</strong>.</p>
+                    <p style="${p}margin-top:3mm;">${S.verified} The record is complete in all respects and is submitted for evaluation.</p>
+                    <p style="${p}margin-top:3mm;">The student has shown regular attendance, sincerity and a good understanding of the subject during the practical sessions.</p>
+                </div>
+                ${dets}
+                ${dateLine}
+            </div>
+            ${sigBlock(['Teacher', 'Examiner'], '#6b7280')}
+        </div>`;
+    } else {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;border:1.5px solid #000;padding:8mm 10mm;min-height:0;">
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0;padding:3mm 0;">
+                <h2 style="font:700 20pt/1.25 ${SERIF};text-align:center;text-transform:uppercase;text-decoration:underline;letter-spacing:.08em;">Certificate of Authenticity</h2>
+                <div>
+                    <p style="${p}">This is to certify that <strong>${e(m.name)}</strong>, a student of class <strong>${e(m.className)}</strong> bearing Roll Number <strong>${e(m.roll)}</strong>, has successfully completed the practical coursework and project file requirements for <strong>${S.title} (Subject Code ${S.code})</strong> as prescribed by the Central Board of Secondary Education (CBSE) for the academic session <strong>${e(m.session)}</strong>.</p>
+                    <p style="${p}margin-top:3mm;">${S.verified} The work contained in this record file is authentic and original, and was executed by the student under supervision.</p>
+                    <p style="${p}margin-top:3mm;">The student has shown regular attendance, sincerity and a good understanding of the subject during the practical sessions.</p>
+                </div>
+                ${dets}
+                ${dateLine}
+            </div>
+            ${sigBlock(['Internal / Teacher Signature', 'External Examiner Signature'])}
+        </div>`;
+    }
+    return makeIntroPage(inner, introFooter('Certificate', pageNum));
+}
+
+/* -------------------------- ACKNOWLEDGEMENT -------------------------- */
+function buildAckPage(pageNum) {
+    const m = state.meta, S = INTRO_SUBJECT, e = escapeHtml;
+    const aStyle = state.intro.ackStyle || 'classic';
+    const fs = (state.layout.fontSize || 10) + 3;
+    const p = `font-size:${fs}pt;line-height:2.1;text-align:justify;`;
+    const sign = `<div style="text-align:right;font:400 11pt/1.7 'Inter',Arial,sans-serif;">
+        <div style="height:14mm;"></div>
+        <p style="font-weight:700;font-size:12pt;">${e(m.name)}</p>
+        <p>Roll No: ${e(m.roll)}</p></div>`;
+    const dateLine = `<div style="font:600 10.5pt 'Inter',Arial,sans-serif;">Date: ______________</div>`;
+    let inner = '';
+
+    if (aStyle === 'formal') {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;border:1.5px solid #000;padding:8mm 10mm;min-height:0;">
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0;padding:3mm 0;">
+                <h2 style="font:700 20pt/1.25 ${SERIF};text-align:center;text-transform:uppercase;letter-spacing:.12em;">Acknowledgement</h2>
+                <div>
+                    <p style="${p}">I would like to express my sincere gratitude to my teacher <strong>${e(m.teacher)}</strong> and our respected Principal for their constant guidance, valuable feedback and support throughout the course of this project.</p>
+                    <p style="${p}margin-top:3mm;">I am also thankful to the school management for providing the laboratory facilities and the learning environment needed to complete this practical file successfully.</p>
+                    <p style="${p}margin-top:3mm;">I thank my parents and friends for their encouragement, patience and helpful suggestions during the compilation of this practical file. Their support kept me motivated until the very end.</p>
+                    <p style="${p}margin-top:3mm;">Finally, I thank everyone who directly or indirectly helped me in completing this work.</p>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-end;">${dateLine}${sign}</div>
+        </div>`;
+    } else {
+        inner = `
+        <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;min-height:0;padding:4mm 0;">
+                <h2 style="font:700 20pt/1.25 ${SERIF};text-align:center;text-transform:uppercase;text-decoration:underline;letter-spacing:.1em;">Acknowledgement</h2>
+                <div>
+                    <p style="${p}">I wish to express my deep sense of gratitude to my ${S.title} teacher <strong>${e(m.teacher)}</strong> and our Principal for providing the necessary guidance, laboratory facilities, and encouragement throughout this practical project. Their timely advice helped me understand each concept clearly.</p>
+                    <p style="${p}margin-top:3mm;">I am also thankful to the school management for giving me the opportunity and the resources to carry out this work in a well-equipped environment.</p>
+                    <p style="${p}margin-top:3mm;">I am equally grateful to my parents and fellow classmates for their helpful suggestions and unwavering support while compiling these practical records.</p>
+                    <p style="${p}margin-top:3mm;">Last but not least, I thank everyone who contributed, directly or indirectly, to the successful completion of this project file.</p>
+                </div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-end;">${dateLine}${sign}</div>
+        </div>`;
+    }
+    return makeIntroPage(inner, introFooter('Acknowledgement', pageNum));
+}
+
+/* ------------------------------- INDEX ------------------------------- */
+/* Always ONE page. Row size / font shrink with the number of records, and
+   with many records the list flows into two columns. Short lists are padded
+   with blank ruled rows so the table fills the sheet. */
+function buildIndexPageEl(rows, pageNum) {
+    const e = escapeHtml, n = rows.length;
+    const cols = n > 36 ? 2 : 1;
+    const perCol = Math.max(cols === 1 ? 20 : 0, Math.ceil(n / cols));
+    const fsz = cols === 2 ? (perCol > 44 ? 6.5 : perCol > 38 ? 7 : 7.5)
+              : n <= 22 ? 10.5 : n <= 28 ? 9.5 : 8.5;
+    const padV = cols === 2 ? 0.6 : n <= 22 ? 2 : 1;
+    const bd = '1px solid #9ca3af';
+    const cell = `padding:${padV}mm 2mm;border-right:${bd};border-bottom:${bd};vertical-align:middle;overflow:hidden;`;
+    const th = 'padding:2mm;border-right:1px solid #000;';
+
+    const table = (list, start) => {
+        const body = [];
+        for (let i = 0; i < perCol; i++) {
+            const r = list[i];
+            body.push(r
+                ? `<tr><td style="${cell}text-align:center;font-weight:700;">${r.n}</td><td style="${cell}font-weight:500;">${e(r.title)}</td>${cols === 1 ? `<td style="${cell}text-align:center;text-transform:uppercase;font-size:${Math.max(fsz - 1.5, 6)}pt;">${e(r.type || '')}</td>` : ''}<td style="${cell}border-right:none;text-align:center;font-weight:700;">${r.page}</td></tr>`
+                : `<tr><td style="${cell}">&nbsp;</td><td style="${cell}">&nbsp;</td>${cols === 1 ? `<td style="${cell}">&nbsp;</td>` : ''}<td style="${cell}border-right:none;">&nbsp;</td></tr>`);
+        }
+        const widths = cols === 1 ? '<col style="width:14mm"><col><col style="width:28mm"><col style="width:22mm">'
+                                  : '<col style="width:9mm"><col><col style="width:12mm">';
+        return `<table style="width:100%;height:100%;border-collapse:collapse;table-layout:fixed;border:1.5px solid #000;color:#000;font-size:${fsz}pt;line-height:1.2;">
+            <colgroup>${widths}</colgroup>
+            <thead><tr style="background:#e5e7eb;font-size:${Math.min(fsz, 9)}pt;text-transform:uppercase;border-bottom:1.5px solid #000;height:9mm;">
+                <th style="${th}">S.No</th><th style="${th}text-align:left;">Practical / Task Description</th>${cols === 1 ? `<th style="${th}">Tool</th>` : ''}<th style="padding:2mm;">Page</th></tr></thead>
+            <tbody>${body.join('')}</tbody></table>`;
+    };
+
+    const tables = [];
+    for (let c = 0; c < cols; c++) tables.push(`<div style="flex:1;min-width:0;">${table(rows.slice(c * perCol, (c + 1) * perCol))}</div>`);
+
+    const el = document.createElement('div');
+    el.className = 'a4-page rec-page font-sans';
+    el.style.fontFamily = "'Inter', Arial, sans-serif";
+    el.innerHTML = `
+        <div class="page-body" style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;">
+            <h2 style="font:700 20pt/1.2 ${SERIF};text-align:center;text-decoration:underline;text-transform:uppercase;letter-spacing:.12em;margin:2mm 0 8mm;">Practical Index Sheet</h2>
+            <div style="flex:1;min-height:0;display:flex;gap:5mm;">${tables.join('')}</div>
+        </div>
+        ${introFooter('Index', pageNum)}`;
+    return el;
+}
+
 function renderDocumentPreview() {
     const container = document.getElementById('a4-document-container');
     container.innerHTML = '';
@@ -540,235 +838,12 @@ function renderDocumentPreview() {
         }
     }
 
-    if (state.intro.showCover) {
-        const coverPage = document.createElement('div');
-        coverPage.className = "a4-page font-serif-doc";
-        const style = state.intro.coverStyle || 'classic';
-        if (style === 'modern') {
-            coverPage.innerHTML = `
-                <div class="h-full border-l-8 border-black pl-8 flex flex-col justify-between py-4">
-                    <div>
-                        <span class="text-xs font-bold font-sans tracking-widest uppercase bg-black text-white px-2 py-1">CBSE CLASS XII</span>
-                        <h1 class="text-3xl font-extrabold uppercase mt-6 tracking-wide">ARTIFICIAL INTELLIGENCE</h1>
-                        <p class="text-sm font-sans font-semibold text-gray-700 mt-1">SUBJECT CODE 843 • PRACTICAL FILE</p>
-                    </div>
-                    <div class="my-auto py-12">
-                        <p class="text-xs uppercase tracking-widest text-gray-500 font-sans">Academic Session</p>
-                        <p class="text-xl font-bold font-sans">${escapeHtml(state.meta.session)}</p>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4 text-xs font-sans border-t border-black pt-6">
-                        <div>
-                            <p class="font-bold text-gray-500 text-[10px] uppercase">Submitted By:</p>
-                            <p class="font-bold text-sm">${escapeHtml(state.meta.name)}</p>
-                            <p>Roll No: ${escapeHtml(state.meta.roll)}</p>
-                            <p>${escapeHtml(state.meta.className)}</p>
-                            <p>${escapeHtml(state.meta.school)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="font-bold text-gray-500 text-[10px] uppercase">Evaluated By:</p>
-                            <p class="font-bold text-sm">${escapeHtml(state.meta.teacher)}</p>
-                            <p>Department of Computer Science & AI</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else if (style === 'formal') {
-            coverPage.innerHTML = `
-                <div class="h-full border border-black p-8 flex flex-col justify-between text-center">
-                    <div>
-                        <h3 class="text-sm font-bold uppercase tracking-widest">${escapeHtml(state.meta.school)}</h3>
-                        <p class="text-xs text-gray-600 mt-1">Affiliated to Central Board of Secondary Education (CBSE)</p>
-                    </div>
-                    <div class="my-auto py-8">
-                        <h1 class="text-3xl font-bold uppercase underline tracking-wider">PROJECT RECORD FILE</h1>
-                        <p class="text-base font-semibold mt-2">ARTIFICIAL INTELLIGENCE (CODE 843)</p>
-                        <p class="text-xs italic text-gray-600 mt-4">Session: ${escapeHtml(state.meta.session)}</p>
-                    </div>
-                    <div class="grid grid-cols-2 text-left text-xs font-sans border-t border-black pt-4">
-                        <div>
-                            <p><strong>Name:</strong> ${escapeHtml(state.meta.name)}</p>
-                            <p><strong>Roll No:</strong> ${escapeHtml(state.meta.roll)}</p>
-                            <p><strong>Class:</strong> ${escapeHtml(state.meta.className)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p><strong>Teacher In-Charge:</strong></p>
-                            <p>${escapeHtml(state.meta.teacher)}</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            coverPage.innerHTML = `
-                <div class="h-full border-4 border-double border-black p-6 flex flex-col justify-between text-center">
-                    <div>
-                        <h2 class="text-sm font-bold tracking-widest uppercase">CBSE Academic Session ${escapeHtml(state.meta.session)}</h2>
-                        <p class="text-xs uppercase mt-0.5 tracking-wider text-gray-700">Central Board of Secondary Education</p>
-                    </div>
-                    <div class="my-auto py-8 space-y-3">
-                        <div class="border-y-2 border-black py-5">
-                            <h1 class="text-2xl font-extrabold tracking-wide uppercase">ARTIFICIAL INTELLIGENCE</h1>
-                            <p class="text-xs font-semibold tracking-widest mt-1">SUBJECT CODE: 843 • PRACTICAL FILE</p>
-                        </div>
-                        <p class="text-xs italic text-gray-600">A Practical Record File on Data Science with Python & Orange Data Mining Tool</p>
-                    </div>
-                    <div class="grid grid-cols-2 text-left text-xs gap-4 border-t border-black pt-4 font-sans">
-                        <div>
-                            <p class="font-bold uppercase text-gray-500 text-[9pt]">Submitted By:</p>
-                            <p><strong>Name:</strong> ${escapeHtml(state.meta.name)}</p>
-                            <p><strong>Roll No:</strong> ${escapeHtml(state.meta.roll)}</p>
-                            <p><strong>Class:</strong> ${escapeHtml(state.meta.className)}</p>
-                            <p><strong>School:</strong> ${escapeHtml(state.meta.school)}</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="font-bold uppercase text-gray-500 text-[9pt]">Submitted To:</p>
-                            <p><strong>Evaluator:</strong> ${escapeHtml(state.meta.teacher)}</p>
-                            <p>Department of Computer Science & AI</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        container.appendChild(coverPage);
-        currentPageNum++;
-    }
-
-    if (state.intro.showCert) {
-        const certPage = document.createElement('div');
-        certPage.className = "a4-page font-serif-doc text-justify leading-relaxed";
-        certPage.style.fontSize = `${state.layout.fontSize}pt`;
-        const cStyle = state.intro.certStyle || 'classic';
-        let certInner = '';
-        if (cStyle === 'ornate') {
-            certInner = `
-                <div class="flex-1 flex flex-col justify-between">
-                    <div class="border-4 border-double border-black p-6 h-full flex flex-col justify-between">
-                        <div class="space-y-5">
-                            <h2 class="text-2xl font-bold text-center uppercase tracking-wider">Certificate of Excellence</h2>
-                            <p class="mt-6">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll No <strong>${escapeHtml(state.meta.roll)}</strong>, has completed the AI (843) practical project for session <strong>${escapeHtml(state.meta.session)}</strong> with distinction.</p>
-                            <p>All Python programs and Orange workflows have been verified and found satisfactory.</p>
-                            <div class="grid grid-cols-2 gap-10 pt-20 text-center text-xs font-sans">
-                                <div><p class="border-t border-black pt-2 font-bold">Teacher's Signature</p></div>
-                                <div><p class="border-t border-black pt-2 font-bold">External Examiner</p></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else if (cStyle === 'minimal') {
-            certInner = `
-                <div class="flex-1 flex flex-col justify-between">
-                    <div class="space-y-6 pt-10">
-                        <h2 class="text-xl font-bold text-center uppercase tracking-wider">Certificate</h2>
-                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong> of <strong>${escapeHtml(state.meta.className)}</strong>, Roll No <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the AI (843) project file for session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
-                        <div class="grid grid-cols-2 gap-10 pt-24 text-center text-xs font-sans">
-                            <div><p class="border-t border-gray-400 pt-2">Teacher</p></div>
-                            <div><p class="border-t border-gray-400 pt-2">Examiner</p></div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            certInner = `
-                <div class="flex-1 flex flex-col justify-between">
-                    <div class="space-y-6">
-                        <h2 class="text-xl font-bold text-center underline uppercase tracking-wider">Certificate of Authenticity</h2>
-                        <p class="mt-8">This is to certify that <strong>${escapeHtml(state.meta.name)}</strong>, a student of class <strong>${escapeHtml(state.meta.className)}</strong> bearing Roll Number <strong>${escapeHtml(state.meta.roll)}</strong>, has successfully completed the practical coursework and project file requirements for <strong>Artificial Intelligence (Subject Code 843)</strong> as prescribed by the Central Board of Secondary Education (CBSE) for the academic session <strong>${escapeHtml(state.meta.session)}</strong>.</p>
-                        <p>All Python data science programs and Orange tool predictive workflows contained in this record file represent authentic, original work executed by the student under supervision.</p>
-                        <div class="grid grid-cols-2 gap-10 pt-24 text-center text-xs font-sans">
-                            <div><p class="border-t border-black pt-2 font-bold">Internal / Teacher Signature</p></div>
-                            <div><p class="border-t border-black pt-2 font-bold">External Examiner Signature</p></div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        certPage.innerHTML = `
-            ${certInner}
-            ${state.layout.showHeaders ? `<div class="text-[8pt] font-sans text-gray-500 border-t border-gray-300 pt-2 flex justify-between"><span>Certificate</span><span>Page ${currentPageNum}</span></div>` : ''}
-        `;
-        container.appendChild(certPage);
-        currentPageNum++;
-    }
-
-    if (state.intro.showAck) {
-        const ackPage = document.createElement('div');
-        ackPage.className = "a4-page font-serif-doc text-justify leading-relaxed";
-        ackPage.style.fontSize = `${state.layout.fontSize}pt`;
-        const aStyle = state.intro.ackStyle || 'classic';
-        let ackInner = '';
-        if (aStyle === 'formal') {
-            ackInner = `
-                <div class="flex-1 flex flex-col justify-between">
-                    <div class="space-y-6">
-                        <h2 class="text-xl font-bold text-center uppercase tracking-wider">Acknowledgement</h2>
-                        <p class="mt-8">I would like to express my sincere gratitude to my teacher <strong>${escapeHtml(state.meta.teacher)}</strong> and the Principal for their guidance and support throughout this project.</p>
-                        <p>I also thank my parents and friends for their encouragement during the compilation of this practical file.</p>
-                        <div class="text-right pt-12 font-sans text-xs">
-                            <p class="font-bold">${escapeHtml(state.meta.name)}</p>
-                            <p>Roll No: ${escapeHtml(state.meta.roll)}</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            ackInner = `
-                <div class="flex-1 flex flex-col justify-between">
-                    <div class="space-y-6">
-                        <h2 class="text-xl font-bold text-center underline uppercase tracking-wider">Acknowledgement</h2>
-                        <p class="mt-8">I wish to express my deep sense of gratitude to my Artificial Intelligence teacher <strong>${escapeHtml(state.meta.teacher)}</strong> and our Principal for providing the necessary guidance, laboratory facilities, and encouragement throughout this practical project.</p>
-                        <p>I am also thankful to my parents and fellow classmates for their helpful suggestions and support while compiling these practical records.</p>
-                        <div class="text-right pt-12 font-sans text-xs">
-                            <p class="font-bold">${escapeHtml(state.meta.name)}</p>
-                            <p>Roll No: ${escapeHtml(state.meta.roll)}</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        ackPage.innerHTML = `
-            ${ackInner}
-            ${state.layout.showHeaders ? `<div class="text-[8pt] font-sans text-gray-500 border-t border-gray-300 pt-2 flex justify-between"><span>Acknowledgement</span><span>Page ${currentPageNum}</span></div>` : ''}
-        `;
-        container.appendChild(ackPage);
-        currentPageNum++;
-    }
-
+    if (state.intro.showCover) { container.appendChild(buildCoverPage()); currentPageNum++; }
+    if (state.intro.showCert) { container.appendChild(buildCertPage(currentPageNum)); currentPageNum++; }
+    if (state.intro.showAck) { container.appendChild(buildAckPage(currentPageNum)); currentPageNum++; }
     if (state.intro.showIndex) {
-        const indexPage = document.createElement('div');
-        indexPage.className = "a4-page font-sans";
-        indexPage.style.fontSize = `${state.layout.fontSize}pt`;
-        let indexRowsHTML = '';
-        state.records.forEach((rec, idx) => {
-            const pageNo = recordStartPages[idx] || (currentPageNum + 1);
-            indexRowsHTML += `
-                <tr class="border-b border-gray-300 text-[9pt]">
-                    <td class="p-1.5 font-bold text-center border-r border-gray-300">${idx + 1}</td>
-                    <td class="p-1.5 border-r border-gray-300 font-medium">${escapeHtml(rec.title)}</td>
-                    <td class="p-1.5 text-center border-r border-gray-300 font-mono text-[8pt] uppercase">${rec.type}</td>
-                    <td class="p-1.5 text-center font-semibold font-mono">${pageNo}</td>
-                </tr>
-            `;
-        });
-        indexPage.innerHTML = `
-            <div>
-                <h2 class="text-lg font-bold text-center underline uppercase tracking-wider mb-4 font-serif-doc">Practical Index Sheet</h2>
-                <table class="w-full border-collapse border border-black text-left">
-                    <thead>
-                        <tr class="bg-gray-100 border-b border-black text-[9pt] font-bold uppercase">
-                            <th class="p-1.5 border-r border-black w-10 text-center">S.No</th>
-                            <th class="p-1.5 border-r border-black">Practical / Task Description</th>
-                            <th class="p-1.5 border-r border-black w-24 text-center">Tool</th>
-                            <th class="p-1.5 w-20 text-center">Page No</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${indexRowsHTML || '<tr><td colspan="4" class="p-4 text-center text-gray-500">No records loaded.</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-            ${state.layout.showHeaders ? `<div class="text-[8pt] text-gray-500 border-t border-gray-300 pt-2 flex justify-between"><span>Index</span><span>Page ${currentPageNum}</span></div>` : ''}
-        `;
-        container.appendChild(indexPage);
+        const idxRows = state.records.map((rec, idx) => ({ n: idx + 1, title: rec.title, type: rec.type, page: recordStartPages[idx] || (currentPageNum + 1) }));
+        container.appendChild(buildIndexPageEl(idxRows, currentPageNum));
         currentPageNum++;
     }
 
@@ -1044,25 +1119,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const I = state.intro;
         const introCount = (I.showCover ? 1 : 0) + (I.showCert ? 1 : 0) + (I.showAck ? 1 : 0);
-        const ROWS = 26;
-        const idxPages = I.showIndex ? Math.max(1, Math.ceil(state.records.length / ROWS)) : 0;
+        const idxPages = I.showIndex ? 1 : 0;
         const startNum = introCount + idxPages + 1;
         const foot = (l, n) => L.showHeaders ? `<div class="page-footer"><span>${l}</span><span>Page ${n}</span></div>` : '';
 
         const domPage = {};
         const buildIndex = () => { const firstRec = container.querySelector('.rec-page[data-rec]');
-        for (let p = 0; p < idxPages; p++) {
-            const rows = state.records.slice(p * ROWS, (p + 1) * ROWS).map((rec, k) => {
-                const i = p * ROWS + k;
-                return `<tr style="border-bottom:1px solid #d1d5db;font-size:9pt"><td style="padding:5px;text-align:center;font-weight:700;border-right:1px solid #d1d5db">${i + 1}</td><td style="padding:5px;border-right:1px solid #d1d5db">${esc(rec.title)}</td><td style="padding:5px;text-align:center;border-right:1px solid #d1d5db;text-transform:uppercase;font-size:8pt">${rec.type}</td><td style="padding:5px;text-align:center;font-weight:600">${startNum + (domPage[i] || 0)}</td></tr>`;
-            }).join('');
-            const el = document.createElement('div');
-            el.className = 'a4-page rec-page';
-            el.innerHTML = `<div class="page-body"><h2 style="font:700 14pt 'Times New Roman',serif;text-align:center;text-decoration:underline;text-transform:uppercase;margin-bottom:12px">Practical Index Sheet${idxPages > 1 ? ` (${p + 1}/${idxPages})` : ''}</h2>
-                <table style="width:100%;border-collapse:collapse;border:1px solid #000;color:#000"><thead><tr style="background:#f3f4f6;border-bottom:1px solid #000;font-size:9pt;text-transform:uppercase"><th style="padding:5px;width:40px">S.No</th><th style="padding:5px;text-align:left">Practical / Task Description</th><th style="padding:5px;width:80px">Tool</th><th style="padding:5px;width:70px">Page No</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#6b7280">No records loaded.</td></tr>'}</tbody></table></div>${foot('Index', introCount + p + 1)}`;
-            container.insertBefore(el, firstRec || null);
-        } };
+            const rows = state.records.map((rec, i) => ({ n: i + 1, title: rec.title, type: rec.type, page: startNum + (domPage[i] || 0) }));
+            container.insertBefore(buildIndexPageEl(rows, introCount + 1), firstRec || null);
+        };
 
         pages.filter(pg => pg.length).forEach((pg, pi) => {
             const el = document.createElement('div');
