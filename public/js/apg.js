@@ -1206,7 +1206,6 @@ function resetWebsite() {
     const ok = confirm('Reset the whole website?\n\nThis permanently deletes ALL your data from this browser: name and details, records, uploaded screenshots and settings.\n\nThe builder will reload like a brand new visit with a fresh random set of predefined practicals.\n\nThis cannot be undone.');
     if (!ok) return;
     try { localStorage.removeItem('cbse_ai_project_data'); } catch (e) {}
-    try { sessionStorage.clear(); } catch (e) {}
     window.onbeforeunload = null;
     location.reload();
 }
