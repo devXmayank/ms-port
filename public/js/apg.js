@@ -473,10 +473,13 @@ function loadFromLocalStorage() {
             }
         } catch(e) {}
     } else {
-        state.records = presetLibrary.slice(0, 10).concat(presetLibrary.slice(35, 40)).map(p => ({
+        const pick = pickRandom(presetLibrary.filter(p => p.cat === 'python'), 10)
+            .concat(pickRandom(presetLibrary.filter(p => p.cat === 'orange'), 5));
+        state.records = pick.map(p => ({
             type: p.cat, title: p.title, question: p.q, datasetDesc: p.datasetDesc || "",
             code: p.code || "", codeImg: "", dataImg: "", schemaImg: "", output: p.output || "", outputImg: "", imgWidthPct: 100
         }));
+        saveToLocalStorage();
     }
     highlightActiveStyles();
 }
@@ -1188,4 +1191,35 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         renderDocumentPreview();
     };
+});
+
+function pickRandom(arr, n) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a.slice(0, n);
+}
+
+function resetWebsite() {
+    const ok = confirm('Reset the whole website?\n\nThis permanently deletes ALL your data from this browser: name and details, records, uploaded screenshots and settings.\n\nThe builder will reload like a brand new visit with a fresh random set of predefined practicals.\n\nThis cannot be undone.');
+    if (!ok) return;
+    try { localStorage.removeItem('cbse_ai_project_data'); } catch (e) {}
+    try { sessionStorage.clear(); } catch (e) {}
+    window.onbeforeunload = null;
+    location.reload();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    const printBtn = document.querySelector('header button[onclick="triggerPrint()"]');
+    if (!printBtn || document.getElementById('reset-site-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'reset-site-btn';
+    btn.type = 'button';
+    btn.title = 'Delete all data and start fresh';
+    btn.onclick = resetWebsite;
+    btn.className = 'bg-[#1a191e] hover:text-rose-300 text-rose-400 font-medium px-3 py-2 rounded-full border border-[rgba(255,255,255,0.06)] flex items-center gap-1 transition';
+    btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Reset Website';
+    printBtn.parentNode.insertBefore(btn, printBtn);
 });
